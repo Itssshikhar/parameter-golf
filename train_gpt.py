@@ -62,6 +62,8 @@ class Hyperparameters:
     # Model shape.
     vocab_size = int(os.environ.get("VOCAB_SIZE", 1024))
     num_layers = int(os.environ.get("NUM_LAYERS", 9))
+    num_shared_blocks = int(os.environ.get("NUM_SHARED_BLOCKS", num_layers))
+    shared_block_pattern = os.environ.get("SHARED_BLOCK_PATTERN", "cycle")
     num_kv_heads = int(os.environ.get("NUM_KV_HEADS", 4))
     model_dim = int(os.environ.get("MODEL_DIM", 512))
     num_heads = int(os.environ.get("NUM_HEADS", 8))
@@ -96,13 +98,17 @@ class Hyperparameters:
 def zeropower_via_newtonschulz5(G: Tensor, steps: int = 10, eps: float = 1e-7) -> Tensor:
     # Orthogonalize a 2D update matrix with a fast Newton-Schulz iteration.
     # Muon uses this to normalize matrix-shaped gradients before applying them.
-    a, b, c = (3.4445, -4.7750, 2.0315)
+    # So the core idea for this to compute "matrix sign function or zero-power or orthogonalization" of a gradient matrix using Newton-Schulz iteration.
+    # Instead of using raw gradient to update weight matrices, first orthogonalize it (meaning the update direction has equal magnitude in all singular-value directions, which prevents the optimizer from collapsing updates into the dominant gradient direction).
+    # Making this spectral version of "normalize your gradients" but for matrices.
+    
+    a, b, c = (3.4445, -4.7750, 2.0315) # These are 5th-order polynomial coefficients for Newton-Schulz iteration that converges to the matrix polar factor. Pre-computed to maximize covergence.
     X = G.bfloat16()
     X /= X.norm() + eps
-    transposed = G.size(0) > G.size(1)
+    transposed = G.size(0) > G.size(1) # Iteration works better when wide (more cols than rows). If tall, transpose, iterate, transpose back.
     if transposed:
         X = X.T
-    for _ in range(steps):
+    for _ in range(steps): # computes X_k+1 = a*X_k + (b*A + c*A^2) @ X_k, where A = X_k @ X_k^T. After this, X is an orthogonal matrix that preserves the singular values of G but sets all singular values to 1.
         A = X @ X.T
         B = b * A + c * A @ A
         X = a * X + B @ X
@@ -617,7 +623,7 @@ class MLP(nn.Module):
         return self.proj(x.square())
 
 
-class Block(nn.Module):
+class BlockCore(nn.Module):
     def __init__(
         self,
         dim: int,
@@ -628,20 +634,25 @@ class Block(nn.Module):
         qk_gain_init: float,
     ):
         super().__init__()
-        self.attn_norm = RMSNorm()
-        self.mlp_norm = RMSNorm()
         self.attn = CausalSelfAttention(dim, num_heads, num_kv_heads, rope_base, qk_gain_init)
         self.mlp = MLP(dim, mlp_mult)
+
+
+class BlockControls(nn.Module):
+    def __init__(self, dim: int):
+        super().__init__()
+        self.attn_norm = RMSNorm()
+        self.mlp_norm = RMSNorm()
         self.attn_scale = nn.Parameter(torch.ones(dim, dtype=torch.float32))
         self.mlp_scale = nn.Parameter(torch.ones(dim, dtype=torch.float32))
         self.resid_mix = nn.Parameter(torch.stack((torch.ones(dim), torch.zeros(dim))).float())
 
-    def forward(self, x: Tensor, x0: Tensor) -> Tensor:
+    def forward(self, x: Tensor, x0: Tensor, core: BlockCore) -> Tensor:
         mix = self.resid_mix.to(dtype=x.dtype)
         x = mix[0][None, None, :] * x + mix[1][None, None, :] * x0
-        attn_out = self.attn(self.attn_norm(x))
+        attn_out = core.attn(self.attn_norm(x))
         x = x + self.attn_scale.to(dtype=x.dtype)[None, None, :] * attn_out
-        x = x + self.mlp_scale.to(dtype=x.dtype)[None, None, :] * self.mlp(self.mlp_norm(x))
+        x = x + self.mlp_scale.to(dtype=x.dtype)[None, None, :] * core.mlp(self.mlp_norm(x))
         return x
 
 
@@ -650,6 +661,8 @@ class GPT(nn.Module):
         self,
         vocab_size: int,
         num_layers: int,
+        num_shared_blocks: int,
+        shared_block_pattern: str,
         model_dim: int,
         num_heads: int,
         num_kv_heads: int,
@@ -666,14 +679,25 @@ class GPT(nn.Module):
         self.tie_embeddings = tie_embeddings
         self.tied_embed_init_std = tied_embed_init_std
         self.logit_softcap = logit_softcap
+        if num_shared_blocks <= 0 or num_shared_blocks > num_layers:
+            raise ValueError(
+                f"num_shared_blocks must be in [1, num_layers], got {num_shared_blocks} for num_layers={num_layers}"
+            )
+        if shared_block_pattern not in {"cycle", "chunk"}:
+            raise ValueError(
+                f"shared_block_pattern must be one of ['cycle', 'chunk'], got {shared_block_pattern!r}"
+            )
         self.tok_emb = nn.Embedding(vocab_size, model_dim)
+        self.num_layers = num_layers
+        self.num_shared_blocks = num_shared_blocks
+        self.shared_block_pattern = shared_block_pattern
         self.num_encoder_layers = num_layers // 2
         self.num_decoder_layers = num_layers - self.num_encoder_layers
         self.num_skip_weights = min(self.num_encoder_layers, self.num_decoder_layers)
         self.skip_weights = nn.Parameter(torch.ones(self.num_skip_weights, model_dim, dtype=torch.float32))
-        self.blocks = nn.ModuleList(
+        self.block_cores = nn.ModuleList(
             [
-                Block(
+                BlockCore(
                     model_dim,
                     num_heads,
                     num_kv_heads,
@@ -681,14 +705,24 @@ class GPT(nn.Module):
                     rope_base,
                     qk_gain_init,
                 )
-                for i in range(num_layers)
+                for _ in range(num_shared_blocks)
             ]
         )
+        self.block_controls = nn.ModuleList([BlockControls(model_dim) for _ in range(num_layers)])
+        self.block_core_indices = self._build_block_core_indices()
         self.final_norm = RMSNorm()
         self.lm_head = None if tie_embeddings else CastedLinear(model_dim, vocab_size, bias=False)
         if self.lm_head is not None:
             self.lm_head._zero_init = True
         self._init_weights()
+
+    def _build_block_core_indices(self) -> tuple[int, ...]:
+        if self.shared_block_pattern == "cycle":
+            return tuple(i % self.num_shared_blocks for i in range(self.num_layers))
+        return tuple(min((i * self.num_shared_blocks) // self.num_layers, self.num_shared_blocks - 1) for i in range(self.num_layers))
+
+    def block_share_map_str(self) -> str:
+        return ",".join(str(i) for i in self.block_core_indices)
 
     def _init_weights(self) -> None:
         if self.tie_embeddings:
@@ -705,12 +739,13 @@ class GPT(nn.Module):
 
         # First half stores skips; second half reuses them in reverse order.
         for i in range(self.num_encoder_layers):
-            x = self.blocks[i](x, x0)
+            x = self.block_controls[i](x, x0, self.block_cores[self.block_core_indices[i]])
             skips.append(x)
         for i in range(self.num_decoder_layers):
             if skips:
                 x = x + self.skip_weights[i].to(dtype=x.dtype)[None, None, :] * skips.pop()
-            x = self.blocks[self.num_encoder_layers + i](x, x0)
+            layer_idx = self.num_encoder_layers + i
+            x = self.block_controls[layer_idx](x, x0, self.block_cores[self.block_core_indices[layer_idx]])
 
         x = self.final_norm(x).reshape(-1, x.size(-1))
         targets = target_ids.reshape(-1)
@@ -826,6 +861,8 @@ def main() -> None:
     base_model = GPT(
         vocab_size=args.vocab_size,
         num_layers=args.num_layers,
+        num_shared_blocks=args.num_shared_blocks,
+        shared_block_pattern=args.shared_block_pattern,
         model_dim=args.model_dim,
         num_heads=args.num_heads,
         num_kv_heads=args.num_kv_heads,
@@ -848,7 +885,12 @@ def main() -> None:
     # - untied lm_head (Adam) uses HEAD_LR
     # - matrix params in transformer blocks use MATRIX_LR via Muon
     # - vectors/scalars use SCALAR_LR via Adam
-    block_named_params = list(base_model.blocks.named_parameters())
+    block_named_params = [
+        (f"block_controls.{name}", p) for name, p in base_model.block_controls.named_parameters()
+    ]
+    block_named_params += [
+        (f"block_cores.{name}", p) for name, p in base_model.block_cores.named_parameters()
+    ]
     matrix_params = [
         p
         for name, p in block_named_params
@@ -893,10 +935,17 @@ def main() -> None:
         optimizers.insert(1, optimizer_head)
 
     n_params = sum(p.numel() for p in base_model.parameters())
+    block_control_params = sum(p.numel() for p in base_model.block_controls.parameters())
+    block_core_params = sum(p.numel() for p in base_model.block_cores.parameters())
     log0(f"model_params:{n_params}")
     log0(f"world_size:{world_size} grad_accum_steps:{grad_accum_steps}")
     log0("sdp_backends:cudnn=False flash=True mem_efficient=False math=False")
     log0(f"attention_mode:gqa num_heads:{args.num_heads} num_kv_heads:{args.num_kv_heads}")
+    log0(
+        f"block_sharing:shared_cores:{args.num_shared_blocks}/{args.num_layers} "
+        f"pattern:{args.shared_block_pattern} map:{base_model.block_share_map_str()} "
+        f"shared_core_params:{block_core_params} control_params:{block_control_params}"
+    )
     log0(
         f"tie_embeddings:{args.tie_embeddings} embed_lr:{token_lr} "
         f"head_lr:{args.head_lr if base_model.lm_head is not None else 0.0} "
