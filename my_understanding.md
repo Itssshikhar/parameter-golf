@@ -1,3 +1,31 @@
+- So, first of all, this is to train a LM that is under 16MB artifact (we'll get to this later) and this should be under 10 minutes 8xH100s.
+- This will be tested by compression on FineWeb validation set and it is tokenizer-agnostic, bits per byte (not sure what this means either, so we'll get to this as well).
+- Very very similar to Modded-NanoGPT speedrun.
+- Problem is definitely going to be parameter contrainted like in NanoGPT-speedrun so we need to be cheeky about the approach (can take inspiration from NanoGPT tricks people have already used).
+- It is like L(N) optimization problem, where we have to optimize the lowest loss given a fixed number of N parameters, without thinking about data, compute, steps, or arch (?? why not this).
+- Now WTF is this 16MB artifact? So this artifact is computed as "code bytes" + "compressed model bytes" (as in code generated binary + final model size??). Also 16MB is 16,000,000 total bytes and no other interpretation.
+- Restrictions on evaluation are interesting. They are saying that eval shouldn't take more than 10mins on 8xH100 + we have 10mins of training time. Eval are done at varying seq_len. And for the most important part, we are allowed to access training data, yes it is allowed, during eval, if and only if we pay for those 'bits' in the 16MB limit (this is very interesting coz they are literally saying go MF wild on this so prolly TT-compute, TT-training & other tricks??).
+
+-----------------------------------------------------------------------------
+### Compute Form Responses.
+
+to start with experiment, there are some obv problems to address:
+
+- make the model give higher probability for next token (can do this by adding recurrence or a engram-mech where same tokens are hashed).
+- less tokens means less tokens per byte, making for a better val_bpb. (using a diff tokenizer)
+- since we have to have limited size of artifact, instead of having 9 diff blocks each with their own weight (which is redundant, if the output remains ~ same). So using only 2-3 shared weights (stored with a correction-term, which should be more parameter-efficient).
+- quanti is also very obv here as the current storage is row-scale with int8 entries in row . we can change the not-so imp ones with int4, imp ones with fp16 & rest can be int8.
+-----------------------------------------------------------------------------
+
+### train_gpt.py
+
+- 9 transformer blocks at width 512
+- 8 attention heads with 4 KV heads (GQA) and 2x MLP expansion
+- vocab size 1024, seq_len 1024, tied embeddings
+- 524,288 train tokens per step for 20,000 iterations with a ~10min cap
+
+---
+
 # Complete Walkthrough of `train_gpt.py`
 
 ## Lines 1-5: Module Docstring
