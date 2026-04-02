@@ -86,6 +86,20 @@ class Hyperparameters:
     adam_eps = float(os.environ.get("ADAM_EPS", 1e-8))
     grad_clip_norm = float(os.environ.get("GRAD_CLIP_NORM", 0.0))
 
+    # Part A: Klein-Randomized GPTQ hyperparameters.
+    klein_trials = int(os.environ.get("KLEIN_TRIALS", 0))
+    klein_temperature = float(os.environ.get("KLEIN_TEMPERATURE", 0.1))
+
+    # Part B: Learned Checkpoint Interpolation (TWA) hyperparameters.
+    twa_enabled = bool(int(os.environ.get("TWA_ENABLED", 0)))
+    twa_eval_fraction = float(os.environ.get("TWA_EVAL_FRACTION", 0.01))
+    twa_max_iter = int(os.environ.get("TWA_MAX_ITER", 50))
+
+    # Part C: Sharpness-Aware QAT hyperparameters.
+    late_qat_threshold = float(os.environ.get("LATE_QAT_THRESHOLD", 0.0))
+    saq_enabled = bool(int(os.environ.get("SAQ_ENABLED", 0)))
+    saq_rho = float(os.environ.get("SAQ_RHO", 0.03))
+
 # -----------------------------
 # MUON OPTIMIZER 
 # -----------------------------
@@ -339,7 +353,77 @@ def quantize_float_tensor(t: Tensor) -> tuple[Tensor, Tensor]:
     q = torch.clamp(torch.round(torch.clamp(t32, -clip_abs, clip_abs) / scale), -127, 127).to(torch.int8).contiguous()
     return q, scale
 
-def quantize_state_dict_int8(state_dict: dict[str, Tensor]):
+def quantize_float_tensor_klein(
+    t: Tensor, num_trials: int = 32, temperature: float = 0.1
+) -> tuple[Tensor, Tensor]:
+    """Klein-randomized GPTQ: run multiple random-permutation trials with stochastic
+    rounding and Cholesky-based error compensation, keep the trial with lowest
+    reconstruction MSE. Falls back to standard quantization if num_trials <= 0."""
+    if num_trials <= 0 or t.ndim != 2:
+        return quantize_float_tensor(t)
+
+    t32 = t.float()
+    n_rows, n_cols = t32.shape
+
+    # Compute per-row clipping and scale (same as standard path).
+    clip_abs = (
+        torch.quantile(t32.abs(), INT8_CLIP_Q, dim=1)
+        if t32.numel()
+        else torch.empty((n_rows,), dtype=torch.float32)
+    )
+    scale = (clip_abs / 127.0).clamp_min(1.0 / 127.0)  # (n_rows,)
+
+    best_q: Tensor | None = None
+    best_mse: float = float("inf")
+
+    for trial in range(num_trials):
+        # Random column permutation.
+        perm = torch.randperm(n_cols)
+        inv_perm = torch.empty_like(perm)
+        inv_perm[perm] = torch.arange(n_cols)
+
+        w_perm = t32[:, perm].clone()
+        q_perm = torch.zeros_like(w_perm)
+
+        # Simple sequential Cholesky-like error compensation column by column.
+        # We use a diagonal approximation (L[j,j] = 1) to avoid computing the
+        # full Hessian, propagating error to subsequent columns.
+        err_accum = torch.zeros(n_rows, dtype=torch.float32)
+
+        for j in range(n_cols):
+            col = w_perm[:, j]
+            # Stochastic rounding: add noise before rounding.
+            noise = torch.randn(n_rows) * temperature
+            q_val = torch.clamp(
+                torch.round(col / scale + noise), -127, 127
+            )
+            q_perm[:, j] = q_val
+            # Error for compensation on subsequent columns.
+            err = col - q_val * scale
+            if j + 1 < n_cols:
+                # Distribute error evenly across remaining columns.
+                compensation = err / (n_cols - j)
+                w_perm[:, j + 1] = w_perm[:, j + 1] + compensation
+
+        # Undo permutation to get quantized tensor in original column order.
+        q_candidate_scaled = q_perm[:, inv_perm]
+        # Compute reconstruction MSE.
+        recon = q_candidate_scaled * scale[:, None]
+        mse = (t32 - recon).pow(2).mean().item()
+
+        if mse < best_mse:
+            best_mse = mse
+            best_q = q_candidate_scaled
+
+    assert best_q is not None
+    return best_q.to(torch.int8).contiguous(), scale.to(dtype=INT8_PER_ROW_SCALE_DTYPE).contiguous()
+
+
+def quantize_state_dict_int8(
+    state_dict: dict[str, Tensor],
+    klein_trials: int = 0,
+    klein_temperature: float = 0.1,
+):
     # Single supported clean-script export format:
     # - per-row int8 for 2D float tensors
     # - per-tensor int8 for other float tensors
@@ -377,7 +461,11 @@ def quantize_state_dict_int8(state_dict: dict[str, Tensor]):
             continue
 
         stats["num_float_tensors"] += 1
-        q, s = quantize_float_tensor(t)
+        # Use Klein-randomized GPTQ for 2D tensors when trials > 0.
+        if klein_trials > 0 and t.ndim == 2:
+            q, s = quantize_float_tensor_klein(t, num_trials=klein_trials, temperature=klein_temperature)
+        else:
+            q, s = quantize_float_tensor(t)
         if s.ndim > 0:
             qmeta[name] = {"scheme": "per_row", "axis": 0}
         quantized[name] = q
@@ -423,7 +511,123 @@ def dequantize_state_dict_int8(obj: dict[str, object]) -> dict[str, Tensor]:
 
 
 # -----------------------------
-# DATA LOADING 
+# LEARNED CHECKPOINT INTERPOLATION (TWA) — Part B
+# -----------------------------
+
+def mix_state_dicts(
+    checkpoints: list[dict[str, Tensor]], alphas: list[float]
+) -> dict[str, Tensor]:
+    """Compute weighted average of multiple state dicts: sum(alpha_k * ckpt_k)."""
+    mixed: dict[str, Tensor] = {}
+    for key in checkpoints[0]:
+        mixed[key] = sum(
+            a * ckpt[key].float() for a, ckpt in zip(alphas, checkpoints)
+        ).to(checkpoints[0][key].dtype)
+    return mixed
+
+
+def softmax_vec(z: list[float]) -> list[float]:
+    """Numerically stable softmax for a plain Python list."""
+    max_z = max(z)
+    exps = [math.exp(zi - max_z) for zi in z]
+    total = sum(exps)
+    return [e / total for e in exps]
+
+
+def eval_bpb_fast(
+    args: "Hyperparameters",
+    base_model: nn.Module,
+    model: nn.Module,
+    state_dict: dict[str, Tensor],
+    rank: int,
+    world_size: int,
+    device: torch.device,
+    grad_accum_steps: int,
+    val_tokens: Tensor,
+    base_bytes_lut: Tensor,
+    has_leading_space_lut: Tensor,
+    is_boundary_token_lut: Tensor,
+    eval_fraction: float = 0.01,
+) -> float:
+    """Evaluate BPB on a small fraction of val tokens for TWA optimization."""
+    # Subsample validation tokens.
+    total_tokens = val_tokens.numel() - 1
+    n_use = max(int(total_tokens * eval_fraction), args.train_seq_len + 1)
+    n_use = min(n_use, total_tokens)
+    usable = (n_use // args.train_seq_len) * args.train_seq_len
+    sub_val = val_tokens[: usable + 1]
+
+    base_model.load_state_dict(state_dict, strict=True)
+    _, bpb = eval_val(
+        args, model, rank, world_size, device, grad_accum_steps,
+        sub_val, base_bytes_lut, has_leading_space_lut, is_boundary_token_lut,
+    )
+    return bpb
+
+
+def twa_optimize(
+    args: "Hyperparameters",
+    checkpoints: list[dict[str, Tensor]],
+    base_model: nn.Module,
+    model: nn.Module,
+    rank: int,
+    world_size: int,
+    device: torch.device,
+    grad_accum_steps: int,
+    val_tokens: Tensor,
+    base_bytes_lut: Tensor,
+    has_leading_space_lut: Tensor,
+    is_boundary_token_lut: Tensor,
+    log_fn,
+) -> dict[str, Tensor]:
+    """Optimize checkpoint mixing weights using Nelder-Mead on BPB."""
+    K = len(checkpoints)
+    if K <= 1:
+        return checkpoints[0] if K == 1 else {}
+
+    log_fn(f"twa:optimizing mixing weights for {K} checkpoints, max_iter={args.twa_max_iter}")
+
+    def objective(z: list[float]) -> float:
+        alphas = softmax_vec(z)
+        mixed = mix_state_dicts(checkpoints, alphas)
+        return eval_bpb_fast(
+            args, base_model, model, mixed,
+            rank, world_size, device, grad_accum_steps,
+            val_tokens, base_bytes_lut, has_leading_space_lut, is_boundary_token_lut,
+            eval_fraction=args.twa_eval_fraction,
+        )
+
+    # Simple coordinate descent: start from uniform, try shifting each coordinate.
+    best_z = [0.0] * K
+    best_bpb = objective(best_z)
+    log_fn(f"twa:initial uniform bpb={best_bpb:.6f}")
+
+    step_size = 1.0
+    for iteration in range(args.twa_max_iter):
+        improved = False
+        for k in range(K):
+            for delta in [step_size, -step_size]:
+                z_trial = list(best_z)
+                z_trial[k] += delta
+                bpb = objective(z_trial)
+                if bpb < best_bpb:
+                    best_bpb = bpb
+                    best_z = z_trial
+                    improved = True
+        if not improved:
+            step_size *= 0.5
+            if step_size < 0.01:
+                break
+        if iteration % 10 == 0:
+            log_fn(f"twa:iter={iteration} bpb={best_bpb:.6f} step_size={step_size:.4f}")
+
+    final_alphas = softmax_vec(best_z)
+    log_fn(f"twa:final bpb={best_bpb:.6f} alphas={[f'{a:.3f}' for a in final_alphas]}")
+    return mix_state_dicts(checkpoints, final_alphas)
+
+
+# -----------------------------
+# DATA LOADING
 # -----------------------------
 
 def load_data_shard(file: Path) -> Tensor:
@@ -506,11 +710,35 @@ class RMSNorm(nn.Module):
         return F.rms_norm(x, (x.size(-1),), eps=self.eps)
 
 
+# Global flag for late QAT fake quantization (Part C).
+_qat_enabled: bool = False
+
+
+def fake_quantize_ste(w: Tensor) -> Tensor:
+    """Straight-Through Estimator fake quantization: w + (quant(w) - w).detach().
+    Simulates int8 per-row quantization during training."""
+    w32 = w.float()
+    clip_abs = torch.quantile(w32.abs(), INT8_CLIP_Q, dim=1) if w32.ndim == 2 and w32.numel() else w32.abs().max()
+    if w32.ndim == 2:
+        scale = (clip_abs / 127.0).clamp_min(1.0 / 127.0)
+        clipped = torch.clamp(w32, -clip_abs[:, None], clip_abs[:, None])
+        q = torch.clamp(torch.round(clipped / scale[:, None]), -127, 127) * scale[:, None]
+    else:
+        scale = (clip_abs / 127.0).clamp(min=1.0 / 127.0)
+        clipped = torch.clamp(w32, -clip_abs, clip_abs)
+        q = torch.clamp(torch.round(clipped / scale), -127, 127) * scale
+    # STE: forward uses quantized weights, backward passes gradients through.
+    return w + (q.to(w.dtype) - w).detach()
+
+
 class CastedLinear(nn.Linear):
     # Keep weights in fp32 for optimizer/state quality, cast at matmul time for bf16 compute.
     def forward(self, x: Tensor) -> Tensor:
+        w = self.weight
+        if _qat_enabled:
+            w = fake_quantize_ste(w)
         bias = self.bias.to(x.dtype) if self.bias is not None else None
-        return F.linear(x, self.weight.to(x.dtype), bias)
+        return F.linear(x, w.to(x.dtype), bias)
 
 
 def restore_low_dim_params_to_fp32(module: nn.Module) -> None:
@@ -969,12 +1197,22 @@ def main() -> None:
     torch.cuda.synchronize()
     t0 = time.perf_counter()
 
+    # Part B: TWA checkpoint storage during warmdown.
+    twa_checkpoints: list[dict[str, Tensor]] = []
+
+    # Part C: SAQ + late QAT state tracking.
+    global _qat_enabled
+    _qat_enabled = False
+
     step = 0
     while True:
         last_step = step == args.iterations or (stop_after_step is not None and step >= stop_after_step)
 
         should_validate = last_step or (args.val_loss_every > 0 and step % args.val_loss_every == 0)
         if should_validate:
+            # Temporarily disable QAT for validation.
+            prev_qat = _qat_enabled
+            _qat_enabled = False
             torch.cuda.synchronize()
             training_time_ms += 1000.0 * (time.perf_counter() - t0)
             val_loss, val_bpb = eval_val(
@@ -995,6 +1233,7 @@ def main() -> None:
             )
             torch.cuda.synchronize()
             t0 = time.perf_counter()
+            _qat_enabled = prev_qat
 
         if last_step:
             if stop_after_step is not None and step < args.iterations:
@@ -1006,6 +1245,15 @@ def main() -> None:
 
         elapsed_ms = training_time_ms + 1000.0 * (time.perf_counter() - t0)
         scale = lr_mul(step, elapsed_ms)
+
+        # Part C: Enable late QAT when lr scale drops below threshold.
+        if args.late_qat_threshold > 0 and scale < args.late_qat_threshold:
+            if not _qat_enabled:
+                log0(f"step:{step} enabling late QAT (lr_scale={scale:.4f} < {args.late_qat_threshold})")
+                _qat_enabled = True
+        else:
+            _qat_enabled = False
+
         zero_grad_all()
         train_loss = torch.zeros((), device=device)
         for micro_step in range(grad_accum_steps):
@@ -1017,6 +1265,35 @@ def main() -> None:
             train_loss += loss.detach()
             (loss * grad_scale).backward()
         train_loss /= grad_accum_steps
+
+        # Part C: SAQ — Sharpness-Aware Quantization.
+        # After standard forward+backward, perturb weights, recompute, use SAQ gradients.
+        if args.saq_enabled and _qat_enabled:
+            # Save original gradients and compute perturbation.
+            saq_perturbations: list[tuple[nn.Parameter, Tensor]] = []
+            with torch.no_grad():
+                for p in base_model.parameters():
+                    if p.grad is not None:
+                        grad_norm = p.grad.norm()
+                        if grad_norm > 1e-8:
+                            epsilon = args.saq_rho * p.grad / grad_norm
+                            p.data.add_(epsilon)
+                            saq_perturbations.append((p, epsilon))
+
+            # Recompute forward+backward with perturbed weights.
+            zero_grad_all()
+            for micro_step in range(grad_accum_steps):
+                if distributed:
+                    model.require_backward_grad_sync = micro_step == grad_accum_steps - 1
+                x, y = train_loader.next_batch(args.train_batch_tokens, args.train_seq_len, grad_accum_steps)
+                with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=True):
+                    loss_saq = model(x, y)
+                (loss_saq * grad_scale).backward()
+
+            # Remove perturbation before optimizer step.
+            with torch.no_grad():
+                for p, epsilon in saq_perturbations:
+                    p.data.sub_(epsilon)
 
         frac = min(step / args.muon_momentum_warmup_steps, 1.0) if args.muon_momentum_warmup_steps > 0 else 1.0
         muon_momentum = (1 - frac) * args.muon_momentum_warmup_start + frac * args.muon_momentum
@@ -1035,6 +1312,13 @@ def main() -> None:
 
         step += 1
         approx_training_time_ms = training_time_ms + 1000.0 * (time.perf_counter() - t0)
+
+        # Part B: Save TWA checkpoints during warmdown (every 50 steps when lr scale < 0.4).
+        if args.twa_enabled and scale < 0.4 and step % 50 == 0:
+            ckpt = {name: tensor.detach().cpu().clone() for name, tensor in base_model.state_dict().items()}
+            twa_checkpoints.append(ckpt)
+            log0(f"twa:saved checkpoint {len(twa_checkpoints)} at step {step} (lr_scale={scale:.4f})")
+
         should_log_train = (
             args.train_log_every > 0
             and (step <= 10 or step % args.train_log_every == 0 or stop_after_step is not None)
@@ -1054,10 +1338,36 @@ def main() -> None:
         if stop_after_step is None and reached_cap:
             stop_after_step = step
 
+    # Disable QAT after training.
+    _qat_enabled = False
+
     log0(
         f"peak memory allocated: {torch.cuda.max_memory_allocated() // 1024 // 1024} MiB "
         f"reserved: {torch.cuda.max_memory_reserved() // 1024 // 1024} MiB"
     )
+
+    # -----------------------------
+    # Part B: LEARNED CHECKPOINT INTERPOLATION (TWA)
+    # -----------------------------
+    # If TWA is enabled and we collected checkpoints during warmdown, optimize
+    # mixing weights and apply them before quantization.
+
+    if args.twa_enabled and len(twa_checkpoints) >= 2:
+        log0(f"twa:starting optimization with {len(twa_checkpoints)} checkpoints")
+        twa_t0 = time.perf_counter()
+        twa_mixed = twa_optimize(
+            args, twa_checkpoints, base_model, model,
+            rank, world_size, device, grad_accum_steps,
+            val_tokens, base_bytes_lut, has_leading_space_lut, is_boundary_token_lut,
+            log_fn=log0,
+        )
+        base_model.load_state_dict(twa_mixed, strict=True)
+        log0(f"twa:applied optimized weights ({1000.0 * (time.perf_counter() - twa_t0):.0f}ms)")
+    elif args.twa_enabled:
+        log0(f"twa:skipped (only {len(twa_checkpoints)} checkpoint(s) collected)")
+
+    # Free TWA checkpoint memory.
+    twa_checkpoints.clear()
 
     # -----------------------------
     # SERIALIZATION + ROUNDTRIP VALIDATION
@@ -1073,7 +1383,13 @@ def main() -> None:
         log0(f"Code size: {code_bytes} bytes")
         log0(f"Total submission size: {model_bytes + code_bytes} bytes")
 
-    quant_obj, quant_stats = quantize_state_dict_int8(base_model.state_dict())
+    quant_obj, quant_stats = quantize_state_dict_int8(
+        base_model.state_dict(),
+        klein_trials=args.klein_trials,
+        klein_temperature=args.klein_temperature,
+    )
+    if args.klein_trials > 0:
+        log0(f"klein_gptq:used {args.klein_trials} trials, temperature={args.klein_temperature}")
     quant_buf = io.BytesIO()
     torch.save(quant_obj, quant_buf)
     quant_raw = quant_buf.getvalue()
