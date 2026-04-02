@@ -24,7 +24,17 @@ import torch.distributed as dist
 import torch.nn.functional as F
 from torch import Tensor, nn
 from torch.nn.parallel import DistributedDataParallel as DDP
-from flash_attn_interface import flash_attn_func as flash_attn_3_func
+try:
+    from flash_attn_interface import flash_attn_func as flash_attn_3_func
+except ImportError:
+    def flash_attn_3_func(q, k, v, causal=True):
+        q2, k2, v2 = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
+        if k2.size(1) != q2.size(1):
+            groups = q2.size(1) // k2.size(1)
+            k2 = k2.repeat_interleave(groups, dim=1)
+            v2 = v2.repeat_interleave(groups, dim=1)
+        o = F.scaled_dot_product_attention(q2, k2, v2, is_causal=causal)
+        return o.transpose(1, 2)
 class Hyperparameters:
     data_path = os.environ.get("DATA_PATH", "./data/datasets/fineweb10B_sp1024")
     train_files = os.path.join(data_path, "fineweb_train_*.bin")
