@@ -66,6 +66,7 @@ class Hyperparameters:
     model_dim = int(os.environ.get("MODEL_DIM", 512))
     num_heads = int(os.environ.get("NUM_HEADS", 8))
     mlp_mult = int(os.environ.get("MLP_MULT", 2))
+    mlp_rank = int(os.environ.get("MLP_RANK", 0))  # 0 = full-rank MLP; >0 = low-rank factored MLP
     tie_embeddings = bool(int(os.environ.get("TIE_EMBEDDINGS", "1")))
     rope_base = float(os.environ.get("ROPE_BASE", 10000.0))
     logit_softcap = float(os.environ.get("LOGIT_SOFTCAP", 30.0))
@@ -276,6 +277,83 @@ def eval_val(
     tokens_per_byte = val_token_count.item() / val_byte_count.item()
     model.train()
     return float(val_loss.item()), float(bits_per_token * tokens_per_byte)
+
+
+def eval_val_sliding(
+    args: Hyperparameters,
+    model: nn.Module,
+    rank: int,
+    world_size: int,
+    device: torch.device,
+    val_tokens: Tensor,
+    base_bytes_lut: Tensor,
+    has_leading_space_lut: Tensor,
+    is_boundary_token_lut: Tensor,
+    stride: int | None = None,
+) -> tuple[float, float]:
+    """Sliding-window evaluation with configurable stride for more accurate BPB.
+
+    Each window is ``args.train_seq_len`` tokens long.  We slide by ``stride``
+    tokens each step (default: half the sequence length) and only score the
+    tokens in the non-overlapping tail portion of each window.
+    """
+    seq_len = args.train_seq_len
+    if stride is None:
+        stride = seq_len // 2
+
+    total_tokens = val_tokens.numel() - 1  # targets only
+    val_loss_sum = torch.zeros((), device=device, dtype=torch.float64)
+    val_token_count = torch.zeros((), device=device, dtype=torch.float64)
+    val_byte_count = torch.zeros((), device=device, dtype=torch.float64)
+
+    # Collect all window start positions, then shard across ranks.
+    starts = list(range(0, total_tokens - seq_len + 1, stride))
+    my_starts = starts[rank::world_size]
+
+    model.eval()
+    with torch.inference_mode():
+        for begin in my_starts:
+            end = begin + seq_len
+            x = val_tokens[begin:end].to(device=device, dtype=torch.int64).unsqueeze(0)
+            y = val_tokens[begin + 1 : end + 1].to(device=device, dtype=torch.int64).unsqueeze(0)
+
+            with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=True):
+                # Get the underlying model for forward_logits (unwrap DDP / compiled)
+                raw = model
+                while hasattr(raw, "module"):
+                    raw = raw.module
+                if hasattr(raw, "_orig_mod"):
+                    raw = raw._orig_mod
+                logits = raw.forward_logits(x)  # (1, seq_len, V)
+
+            # Only score the non-overlapping tail (tokens that haven't been scored
+            # by the previous window).  For the first window, score everything.
+            score_start = 0 if begin == 0 else (seq_len - stride)
+            logits_tail = logits[:, score_start:, :].reshape(-1, logits.size(-1))
+            targets_tail = y[:, score_start:].reshape(-1)
+            loss = F.cross_entropy(logits_tail.float(), targets_tail, reduction="sum")
+
+            n_scored = targets_tail.numel()
+            val_loss_sum += loss.to(torch.float64)
+            val_token_count += float(n_scored)
+
+            prev_ids = x[:, score_start:].reshape(-1)
+            tgt_ids = targets_tail
+            token_bytes = base_bytes_lut[tgt_ids].to(dtype=torch.int16)
+            token_bytes += (has_leading_space_lut[tgt_ids] & ~is_boundary_token_lut[prev_ids]).to(dtype=torch.int16)
+            val_byte_count += token_bytes.to(torch.float64).sum()
+
+    if dist.is_available() and dist.is_initialized():
+        dist.all_reduce(val_loss_sum, op=dist.ReduceOp.SUM)
+        dist.all_reduce(val_token_count, op=dist.ReduceOp.SUM)
+        dist.all_reduce(val_byte_count, op=dist.ReduceOp.SUM)
+
+    val_loss = val_loss_sum / val_token_count
+    bits_per_token = val_loss.item() / math.log(2.0)
+    tokens_per_byte = val_token_count.item() / val_byte_count.item()
+    model.train()
+    return float(val_loss.item()), float(bits_per_token * tokens_per_byte)
+
 
 # -----------------------------
 # POST-TRAINING QUANTIZATION
@@ -513,6 +591,49 @@ class CastedLinear(nn.Linear):
         return F.linear(x, self.weight.to(x.dtype), bias)
 
 
+class LowRankLinear(nn.Module):
+    """Linear layer factored as x @ A @ B where A: (in_dim, rank), B: (rank, out_dim).
+
+    Two smaller matmuls instead of one large one — never materializes the full matrix.
+    Parameters are stored in fp32 (same convention as CastedLinear) and cast at compute time.
+    """
+
+    def __init__(self, in_dim: int, out_dim: int, rank: int, bias: bool = False):
+        super().__init__()
+        self.A = nn.Parameter(torch.empty(in_dim, rank))
+        self.B = nn.Parameter(torch.empty(rank, out_dim))
+        nn.init.orthogonal_(self.A)
+        nn.init.orthogonal_(self.B)
+        self._zero_init = False
+        if bias:
+            self.bias = nn.Parameter(torch.zeros(out_dim))
+        else:
+            self.bias = None
+
+    def forward(self, x: Tensor) -> Tensor:
+        # x @ A @ B  — two narrow matmuls, no full-rank materialization
+        h = F.linear(x, self.A.to(x.dtype).T)  # (*, in_dim) -> (*, rank)
+        out = F.linear(h, self.B.to(x.dtype).T)  # (*, rank) -> (*, out_dim)
+        if self.bias is not None:
+            out = out + self.bias.to(x.dtype)
+        return out
+
+
+class LowRankMLP(nn.Module):
+    """MLP with low-rank factored weight matrices — relu^2 activation, same as MLP."""
+
+    def __init__(self, dim: int, mlp_mult: int, rank: int):
+        super().__init__()
+        hidden = int(mlp_mult * dim)
+        self.fc = LowRankLinear(dim, hidden, rank)
+        self.proj = LowRankLinear(hidden, dim, rank)
+        self.proj._zero_init = True
+
+    def forward(self, x: Tensor) -> Tensor:
+        x = torch.relu(self.fc(x))
+        return self.proj(x.square())
+
+
 def restore_low_dim_params_to_fp32(module: nn.Module) -> None:
     # Keep small/control parameters in fp32 even when the model body runs in bf16.
     with torch.no_grad():
@@ -626,12 +747,16 @@ class Block(nn.Module):
         mlp_mult: int,
         rope_base: float,
         qk_gain_init: float,
+        mlp_rank: int = 0,
     ):
         super().__init__()
         self.attn_norm = RMSNorm()
         self.mlp_norm = RMSNorm()
         self.attn = CausalSelfAttention(dim, num_heads, num_kv_heads, rope_base, qk_gain_init)
-        self.mlp = MLP(dim, mlp_mult)
+        if mlp_rank > 0:
+            self.mlp = LowRankMLP(dim, mlp_mult, mlp_rank)
+        else:
+            self.mlp = MLP(dim, mlp_mult)
         self.attn_scale = nn.Parameter(torch.ones(dim, dtype=torch.float32))
         self.mlp_scale = nn.Parameter(torch.ones(dim, dtype=torch.float32))
         self.resid_mix = nn.Parameter(torch.stack((torch.ones(dim), torch.zeros(dim))).float())
@@ -659,6 +784,7 @@ class GPT(nn.Module):
         logit_softcap: float,
         rope_base: float,
         qk_gain_init: float,
+        mlp_rank: int = 0,
     ):
         super().__init__()
         if logit_softcap <= 0.0:
@@ -680,6 +806,7 @@ class GPT(nn.Module):
                     mlp_mult,
                     rope_base,
                     qk_gain_init,
+                    mlp_rank=mlp_rank,
                 )
                 for i in range(num_layers)
             ]
@@ -696,6 +823,8 @@ class GPT(nn.Module):
         for module in self.modules():
             if isinstance(module, nn.Linear) and getattr(module, "_zero_init", False):
                 nn.init.zeros_(module.weight)
+            if isinstance(module, LowRankLinear) and getattr(module, "_zero_init", False):
+                nn.init.zeros_(module.B)
 
     def forward(self, input_ids: Tensor, target_ids: Tensor) -> Tensor:
         x = self.tok_emb(input_ids)
@@ -722,6 +851,30 @@ class GPT(nn.Module):
             logits_proj = self.lm_head(x)
         logits = self.logit_softcap * torch.tanh(logits_proj / self.logit_softcap)
         return F.cross_entropy(logits.float(), targets, reduction="mean")
+
+    def forward_logits(self, input_ids: Tensor) -> Tensor:
+        """Return logits (B, T, V) without computing loss — used for sliding-window eval."""
+        x = self.tok_emb(input_ids)
+        x = F.rms_norm(x, (x.size(-1),))
+        x0 = x
+        skips: list[Tensor] = []
+
+        for i in range(self.num_encoder_layers):
+            x = self.blocks[i](x, x0)
+            skips.append(x)
+        for i in range(self.num_decoder_layers):
+            if skips:
+                x = x + self.skip_weights[i].to(dtype=x.dtype)[None, None, :] * skips.pop()
+            x = self.blocks[self.num_encoder_layers + i](x, x0)
+
+        x = self.final_norm(x)
+        if self.tie_embeddings:
+            logits_proj = F.linear(x, self.tok_emb.weight)
+        else:
+            if self.lm_head is None:
+                raise RuntimeError("lm_head is required when tie_embeddings=False")
+            logits_proj = self.lm_head(x)
+        return self.logit_softcap * torch.tanh(logits_proj / self.logit_softcap)
 
 
 # -----------------------------
@@ -835,9 +988,10 @@ def main() -> None:
         logit_softcap=args.logit_softcap,
         rope_base=args.rope_base,
         qk_gain_init=args.qk_gain_init,
+        mlp_rank=args.mlp_rank,
     ).to(device).bfloat16()
     for module in base_model.modules():
-        if isinstance(module, CastedLinear):
+        if isinstance(module, (CastedLinear, LowRankLinear)):
             module.float()
     restore_low_dim_params_to_fp32(base_model)
     compiled_model = torch.compile(base_model, dynamic=False, fullgraph=True)
