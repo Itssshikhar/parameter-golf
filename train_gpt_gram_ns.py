@@ -199,7 +199,7 @@ def zeropower_via_newtonschulz5(G: Tensor, steps: int = 5, eps: float = 1e-7) ->
     """
     # --- Fast path: Dao-AILab package with symmetric GEMM kernels ---
     if _gram_ns is not None:
-        return _gram_ns(G)
+        return _gram_ns(G).contiguous()
 
     # --- Fallback path: pure PyTorch ---
     was_2d = G.ndim == 2

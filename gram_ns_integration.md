@@ -429,6 +429,95 @@ A proper A/B comparison would require running the original `train_gpt.py` on the
 
 **Key takeaway:** The pure PyTorch fallback is SLOWER than the original. The `gram-newton-schulz` package with `quack` symmetric GEMM kernels must be installed for this integration to provide a speedup. The next run should use `pip install gram-newton-schulz` before training.
 
+## 8xH100 run results (2026-04-02) -- WITH kernels (gram-newton-schulz + quack)
+
+**This run used the actual Dao-AILab `gram-newton-schulz` package** with `quack-kernels` symmetric GEMM kernels on H100. It was expected to be faster than both the pure PyTorch fallback and the original baseline. **It was not.**
+
+### Bug fix required
+
+The `GramNewtonSchulz` class returns **non-contiguous tensors** for tall input matrices (where internal transposition via `.mT` occurs). This immediately crashes `dist.all_gather_into_tensor` with `ValueError: Tensors must be contiguous`. Fixed by adding `.contiguous()` on the fast path:
+
+```python
+if _gram_ns is not None:
+    return _gram_ns(G).contiguous()  # was: return _gram_ns(G)
+```
+
+### Environment
+
+- **Hardware:** 8x NVIDIA H100 80GB HBM3
+- **PyTorch:** 2.8.0+cu128
+- **flash-attn:** 2.8.3 (FA3 via `flash_attn.flash_attn_interface`)
+- **gram-newton-schulz:** 0.0.1 (from `git+https://github.com/Dao-AILab/gram-newton-schulz.git`)
+- **quack-kernels:** 0.3.7
+- **nvidia-cutlass-dsl:** 4.4.2
+- **Attention backend:** FA3
+- **NS backend:** gram_newton_schulz
+
+### Configuration
+
+Same as the pure PyTorch fallback run (default env vars, NUM_LAYERS=11, SEED=1337).
+
+### Results
+
+| Metric | Value |
+|---|---|
+| Steps completed | 6060 / 20000 (wallclock capped at 600s) |
+| step_avg | **99.02 ms** |
+| Peak GPU memory | 21,875 MiB / 81,559 MiB per GPU |
+| model_params | 26,993,756 |
+
+#### Validation scores
+
+| Eval stage | val_loss | val_bpb |
+|---|---|---|
+| step 0 (init) | 6.9309 | 4.1049 |
+| step 4000 (mid-train) | 2.0305 | 1.2026 |
+| step 6060 (wallclock stop) | 1.9324 | 1.1445 |
+| Post-EMA | 1.9310 | **1.1436** |
+
+#### Training loss trajectory
+
+| Step | train_loss | train_time | step_avg |
+|---|---|---|---|
+| 500 | 2.4148 | 54,846ms | 109.69ms |
+| 1000 | 2.2735 | 103,760ms | 103.76ms |
+| 2000 | 2.0615 | 201,566ms | 100.78ms |
+| 3000 | 2.1435 | 299,518ms | 99.84ms |
+| 4000 | 1.9363 | 397,455ms | 99.36ms |
+| 5000 | 2.0629 | 495,390ms | 99.08ms |
+| 6000 | 1.9010 | 594,071ms | 99.01ms |
+| 6060 | -- | 600,087ms | 99.02ms |
+
+### Comparison: all three variants
+
+| Variant | step_avg (ms) | Steps in 600s | Post-EMA val_bpb | Notes |
+|---|---|---|---|---|
+| **Original #1 baseline** | ~83.3 | ~7200 | ~1.1194 | Fixed coefficients, `torch.compile`, 10 NS steps |
+| **Gram NS (pure PyTorch fallback)** | 96.86 | 6196 | 1.1412 | Polar Express coefficients, no compile, 5 NS steps |
+| **Gram NS (with kernels)** | **99.02** | **6060** | **1.1436** | quack symmetric GEMM, `@torch.compile(reduce-overhead)`, 5 NS steps |
+
+### Analysis: why the kernels are SLOWER
+
+The kernel integration is **19% slower** than the original baseline (99.02ms vs ~83.3ms) and even **2% slower** than the pure PyTorch fallback (99.02ms vs 96.86ms). Several factors contribute:
+
+1. **Matrix sizes are too small.** The symmetric GEMM kernels (`quack`) are designed for large matrices. In this model, the Gram matrices are 512×512 and 256×256. At these sizes, kernel launch overhead and the `@torch.compile(fullgraph=True, mode="reduce-overhead")` CUDA graph capture overhead dominate any savings from computing only the upper triangle.
+
+2. **`.contiguous()` copy cost.** The fix for non-contiguous outputs adds a full tensor copy on every NS call for tall matrices (MLP banks). This is pure overhead not present in the original.
+
+3. **`torch.compile` mode mismatch.** The original baseline uses standard `torch.compile` on the entire `zeropower_via_newtonschulz5` function. The kernel path uses `@torch.compile(fullgraph=True, mode="reduce-overhead")` internally in `GramNewtonSchulz`, which uses CUDA graphs. CUDA graph capture has higher warmup cost and can be slower for small kernels due to graph replay overhead.
+
+4. **fp16 vs bf16 iteration.** The `GramNewtonSchulz` class iterates in fp16 (more mantissa bits). The original iterates in bf16. The dtype conversion overhead (bf16→fp16→bf16) adds latency.
+
+5. **5 steps vs 10 steps, but with heavier per-step work.** The original does 10 simple iterations with fixed coefficients. Gram NS does 5 iterations but with Q/R tracking, restart logic, and the final Q@X matmul. The algorithmic FLOP savings don't offset the overhead at these sizes.
+
+6. **`steps` parameter is silently ignored.** The fast path ignores the `steps` argument entirely — `GramNewtonSchulz` always uses the full coefficient list it was constructed with. This is an API contract violation that could cause subtle issues if `MUON_BACKEND_STEPS` is changed.
+
+### Conclusion
+
+**The Gram Newton-Schulz kernel integration is a net negative for this submission.** Both the pure PyTorch fallback and the kernel version are slower than the original baseline. The original's simple 10-step fixed-coefficient Newton-Schulz with `torch.compile` remains the fastest option for the matrix sizes in this model (512×2048, 256×512, 512×512).
+
+The Dao-AILab kernels may provide speedups for larger models with bigger weight matrices (e.g., 2048×8192), but for the 27M parameter model in this competition, the overhead exceeds the savings.
+
 ## How to run
 
 ### Prerequisites
