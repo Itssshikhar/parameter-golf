@@ -1,379 +1,386 @@
-# Implementation Plan — All 5 Approaches
+# Implementation Plan -- 5 Training/Architecture Approaches
 
-## Decision: Single Plan vs Separate Plans
+## Philosophy
 
-**Single plan is better** because the approaches share the same codebase (`train_gpt.py`), interact with each other, and should be implemented in a specific order to enable incremental testing. Each approach modifies a different part of the pipeline, so merge conflicts are minimal.
-
----
-
-## Implementation Order (by risk and dependency)
-
-```
-Phase 1: EVAL-ONLY changes (zero training risk)
-  ├── Approach #5: Adaptive Stride          [2-3 hours, zero risk]
-  └── Approach #1: EWMA-gram               [3-4 hours, low risk]
-
-Phase 2: POST-TRAINING changes (zero training risk)
-  ├── Approach #2A: Klein-GPTQ             [2-3 hours, zero risk]
-  └── Approach #2B: Learned Interpolation   [2-3 hours, zero risk]
-
-Phase 3: TRAINING changes (requires retraining)
-  ├── Approach #2C: SAQ                     [2-3 hours, low risk]
-  ├── Approach #3: Meta-Warmdown TTT        [4-6 hours, medium risk]
-  └── Approach #4: Low-Rank Deep Model      [6-8 hours, high risk]
-```
-
-This order ensures: (1) we get immediate measurable results from eval-only changes, (2) we validate the eval infrastructure before making training changes, (3) the riskiest changes come last.
+All 5 approaches change how the model is **trained** or **structured**. None are eval-time tricks. Each modifies the training pipeline, optimizer, loss function, or model architecture to produce a fundamentally better model within the 16MB / 10-minute constraints.
 
 ---
 
-## Phase 1: Eval-Only Changes
+## The 5 Approaches
 
-### Step 1.1: Fork the SOTA train_gpt.py
+| # | Name | Type | Expected BPB Gain | Risk | Lines Changed |
+|---|------|------|------------------|------|---------------|
+| 1 | Low-Rank Factored MLP | Architecture | -0.004 to -0.010 | MEDIUM | ~60-80 |
+| 2 | Reptile Meta-Learning Warmdown | Training (schedule) | -0.003 to -0.008 | MEDIUM | ~75-90 |
+| 3 | SVD + Quantized Factors | Architecture + Compression | -0.002 to -0.006 | MEDIUM | ~100-120 |
+| 4 | Multi-Token Prediction + BPB Loss | Training (loss function) | -0.003 to -0.008 | MEDIUM | ~65-80 |
+| 5 | Gram-Newton-Schulz + FP8 Training | Training (throughput) | -0.003 to -0.006 | LOW-MEDIUM | ~60-80 |
+
+**Theoretical maximum (all 5, fully additive): -0.015 to -0.038 BPB -> target 1.077-1.100**
+**Realistic (partial additivity, some interactions): -0.008 to -0.020 BPB -> target 1.095-1.107**
+
+---
+
+## Implementation Order
+
+The order is determined by three factors:
+1. **Risk**: lowest-risk approaches first (quick wins, validate infrastructure)
+2. **Independence**: approaches that don't require retraining first
+3. **Composability**: approaches that compose cleanly with each other
 
 ```
-Source: records/track_10min_16mb/2026-03-25_ValCalib_GPTQ_XSA_BigramHash3072/train_gpt.py
-Target: parameter-golf-bunny/train_gpt.py
+Phase 1: THROUGHPUT (fastest to implement, lowest risk, benefits all subsequent work)
+  └── Approach #5: Gram-Newton-Schulz + FP8 Training     [4-6 hours]
+
+Phase 2: LOSS FUNCTION (training change, but same architecture)
+  └── Approach #4: Multi-Token Prediction + BPB Loss      [4-6 hours]
+
+Phase 3: TRAINING SCHEDULE (training change, requires careful integration)
+  └── Approach #2: Meta-Learning Warmdown                  [6-8 hours]
+
+Phase 4: ARCHITECTURE (most invasive changes)
+  ├── Approach #1: Low-Rank Deep Model                     [6-8 hours]
+  └── Approach #3: SVD + Quantized Factors                 [6-8 hours]
 ```
 
-- Copy the current SOTA as our starting point
-- Verify it runs and reproduces ~1.1147 BPB (need 8×H100 access)
-- All subsequent modifications are relative to this file
+**Rationale:**
+- Phase 1 first because GNS+FP8 makes ALL subsequent training runs faster. Every experiment benefits.
+- Phase 2 second because MTP+BPB loss is a pure training modification on the existing architecture. Easy to A/B test.
+- Phase 3 third because meta-warmdown requires the training loop to be working correctly (build on Phase 1+2).
+- Phase 4 last because architecture changes are the most invasive and interact with everything else.
+- Approaches #1 and #3 are alternatives (both change architecture for more depth) -- implement both, pick the winner.
 
-### Step 1.2: Implement Adaptive Stride (Approach #5)
+---
 
-**Files modified:** `train_gpt.py` — eval section only
+## Phase 1: Training Throughput (Approach #5)
 
-**Tasks:**
-1. Add a new function `eval_val_adaptive_stride()` alongside existing `eval_val_sliding()`
-2. Phase 1 (coarse): call existing sliding window logic with stride=256, collect per-position NLLs
-3. Phase 2 (classify): compute NLL quantiles (25th, 75th percentile)
-4. Phase 3-4 (fine/standard): re-call sliding window on position subsets with stride=16 and stride=64
-5. Phase 5 (combine): merge scores, compute final BPB
-6. Add env vars: `ADAPTIVE_STRIDE=1`, `STRIDE_FINE=16`, `STRIDE_COARSE=256`, `HARD_FRACTION=0.25`
-7. Wire into the final eval section (after quantization roundtrip)
+### Step 1.1: Implement Gram-Newton-Schulz
 
-**Key implementation detail:** The existing `eval_val_sliding` processes windows sequentially per rank. For position-selective evaluation, we need to generate window schedules that cover only the required positions. Simplest approach: generate all windows for stride=16, then filter to only those whose scored positions overlap with the hard set.
-
-**Testing (without 8×H100):**
-- Can test the coarse→classify→selective logic on CPU with a tiny model
-- Cannot test actual BPB improvement without the SOTA model + validation data on GPU
-
-**Estimated lines:** ~60-80 new lines
-
-### Step 1.3: Implement EWMA-gram (Approach #1)
-
-**Files modified:** `train_gpt.py` — eval section only
+**Files:** `train_gpt.py` lines ~96-109 (zeropower_via_newtonschulz5)
 
 **Tasks:**
-1. Add EWMA counter state initialization (uniform prior)
-2. Modify `eval_val_sliding` (or the adaptive variant) to:
-   a. After computing logits, compute P_neural via softmax
-   b. Look up P_bi and P_uni from counters
-   c. Compute entropy H of P_neural
-   d. Compute entropy-adaptive mixing weight α
-   e. Compute P_final = (1-α_bi-α_uni)·P_neural + α_bi·P_bi + α_uni·P_uni
-   f. Compute NLL from P_final (not from raw CE loss)
-   g. Update counters with the scored token (AFTER scoring)
-3. Handle the model forward pass to return logits instead of loss (need `forward_logits` or modify forward)
-4. Add env vars: `EWMA_ENABLED=1`, `EWMA_LAMBDA_UNI=0.999`, `EWMA_LAMBDA_BI=0.995`, `EWMA_ALPHA_BI_MAX=0.10`, `EWMA_ALPHA_UNI_MAX=0.03`, `EWMA_GATE_W=2.0`, `EWMA_GATE_B=-3.0`
-5. Vectorize: process all scored positions in a window as a batch (avoid per-token Python loop)
+1. Replace `zeropower_via_newtonschulz5` with `zeropower_via_gns`:
+   - Fuse the polynomial: compute `poly(A) = a*I + b*A + c*A@A` as a single matrix
+   - Apply via one matmul: `X = poly(A) @ X` instead of `X = a*X + B@X`
+   - Same interface, same output (to bf16 precision)
 
-**Critical implementation consideration:**
-The current model's `forward()` returns `F.cross_entropy(logits, targets)` — a scalar loss. EWMA-gram needs the raw logits to compute P_neural. Options:
-- Add a `forward_logits()` method that returns logits without computing loss
-- Or split the existing forward into logits + loss steps
+2. Correctness test:
+   ```python
+   G = torch.randn(512, 1536, device='cuda', dtype=torch.bfloat16)
+   out_old = zeropower_via_newtonschulz5(G, steps=5)
+   out_new = zeropower_via_gns(G, steps=5)
+   assert (out_old - out_new).abs().max() < 1e-3
+   ```
 
-The SOTA code already has a `forward_logits` or similar for the GPTQ calibration data generation (line ~1081 in the ValCalib submission). Reuse that.
+3. Speed benchmark:
+   ```python
+   import time
+   for _ in range(100):
+       zeropower_via_newtonschulz5(G, steps=5)
+   torch.cuda.synchronize()
+   # Compare with GNS
+   ```
 
-**Estimated lines:** ~70-90 new/modified lines
+**Expected: ~5ms/step savings -> ~6% speedup**
+
+### Step 1.2: Implement FP8 Training Matmuls
+
+**Files:** `train_gpt.py` CastedLinear class (~line 509)
+
+**Tasks:**
+1. Modify `CastedLinear.forward()` to use `torch._scaled_mm` with FP8 casts
+2. Add per-tensor dynamic scaling for activations and weights
+3. Keep FP8 disabled for:
+   - `tok_emb` (embedding layer, precision-sensitive)
+   - `lm_head` (output projection, precision-sensitive)
+   - Any layer during late QAT phase (QAT needs bf16 precision)
+4. Add `FP8_TRAINING` env var toggle
+
+**Critical dependency:** Verify `torch._scaled_mm` is available in the RunPod PyTorch version. If not, use Triton-based FP8 matmul kernel.
+
+**Testing:**
+- Train 500 steps with FP8 enabled vs disabled
+- Compare training loss curves (should be within 1%)
+- Measure step time reduction
+
+**Expected: ~22% speedup on forward+backward matmuls -> ~15-20% total speedup**
 
 ### Phase 1 Checkpoint
 
-After implementing 1.2 and 1.3, we have:
-- Adaptive stride evaluation
-- EWMA-gram mixing
+**Combined throughput gain: 20-28% faster -> ~8300-8850 steps in 600s**
 
-Both are eval-only. Test by running the SOTA model with these eval modifications on 8×H100.
-
-**Expected improvement from Phase 1: -0.006 to -0.017 BPB**
+Run full 10-min training with GNS+FP8. Measure:
+- Total steps completed
+- Final BPB (should be -0.002 to -0.004 lower than baseline from more training)
+- Training loss curve (should be smooth, no quality degradation)
 
 ---
 
-## Phase 2: Post-Training Changes
+## Phase 2: Loss Function (Approach #4)
 
-### Step 2.1: Implement Klein-Randomized GPTQ (Approach #2A)
+### Step 2.1: Implement Multi-Token Prediction Heads
 
-**Files modified:** `train_gpt.py` — quantization section
-
-**Tasks:**
-1. Modify the existing `quantize_int6_gptq` function (or add `quantize_int6_klein`)
-2. Add outer loop: `for trial in range(K):`
-3. Inside each trial:
-   a. Generate random column permutation
-   b. Reorder H and W columns accordingly
-   c. Recompute Cholesky on permuted H
-   d. Add stochastic noise to rounding: `q = round(w/s + noise)` where noise ~ N(0, temperature)
-   e. Run standard GPTQ column-by-column with error compensation
-   f. Compute Hessian-weighted MSE for this trial
-4. Keep the trial with lowest MSE
-5. Add env vars: `KLEIN_TRIALS=32`, `KLEIN_TEMPERATURE=0.1`
-
-**Key detail:** The existing GPTQ code already has the Cholesky computation. The modification is wrapping it in a loop with random permutations and stochastic rounding.
-
-**Estimated lines:** ~30 modified/new lines
-
-### Step 2.2: Implement Learned Checkpoint Interpolation (Approach #2B)
-
-**Files modified:** `train_gpt.py` — post-training section
+**Files:** `train_gpt.py` GPT class (~line 648)
 
 **Tasks:**
-1. During warmdown, save K=15 checkpoints to CPU memory (modify SWA collection code):
-   ```python
-   if swa_enabled and step % swa_every == 0 and scale < swa_start:
-       checkpoints.append({name: t.detach().cpu().clone() for name, t in model.state_dict().items()})
-   ```
-2. After training completes, before quantization:
-   a. Define `eval_mix(alpha_logits)` function that:
-      - Computes α = softmax(logits)
-      - Mixes checkpoints: w_mix = Σ α_k · w_k
-      - Loads into model, runs fast eval on 1% of val tokens
-      - Returns BPB
-   b. Run Nelder-Mead optimization (from scipy or manual implementation)
-   c. Apply optimal α to get final weights
-3. Add env vars: `TWA_ENABLED=1`, `TWA_EVAL_FRACTION=0.01`, `TWA_MAX_ITER=80`
+1. Add `mtp_heads` to GPT class: K=3 auxiliary CastedLinear layers (d -> V)
+2. Modify `forward()`:
+   - Compute main logits from `lm_head` (unchanged)
+   - Compute auxiliary logits from `mtp_heads[k]` for k=1,2,3
+   - Shift targets: `targets_k = targets[:, k:]` for head k
+   - Compute weighted sum of CE losses
+3. Add auxiliary head parameters to Adam optimizer (not Muon -- they're 1D projections)
+4. At export time: strip `mtp_heads` from state dict
 
-**Dependency note:** scipy may not be available in the RunPod environment. Implement Nelder-Mead manually (~40 lines) or use `torch.optim` with numerical gradients.
+**Key detail:** The auxiliary heads see the same hidden states h_t as the main head. No additional backbone compute.
 
-**Estimated lines:** ~50-60 new lines
+**Testing:**
+- Verify training loss includes all K+1 terms
+- Verify auxiliary losses decrease over training (the model is learning to predict future tokens)
+- Verify exported model has no extra parameters
+
+### Step 2.2: Implement BPB-Weighted Loss
+
+**Files:** `train_gpt.py` training loop (~line 967)
+
+**Tasks:**
+1. Pass `base_bytes_lut` into the training forward pass (currently only used for eval)
+2. Compute per-token weight: `w_t = 1.0 / max(1, bytes(target_t))`
+3. Normalize weights to mean 1.0 (so the learning rate doesn't need adjustment)
+4. Apply weights to CE loss: `loss = (ce * w).mean()`
+5. Add warmup: linearly interpolate from uniform to BPB-weighted over first 500 steps
+
+**Testing:**
+- Verify BPB improves (even if per-token CE is slightly worse, BPB should be better)
+- Verify training stability (no loss spikes from upweighted short tokens)
 
 ### Phase 2 Checkpoint
 
-After Phase 2, we have all eval-only and post-training improvements. Test end-to-end on 8×H100.
+Run full training with Phase 1 + Phase 2. Measure BPB improvement.
 
-**Expected cumulative improvement from Phase 1+2: -0.010 to -0.024 BPB**
+**Expected cumulative: -0.005 to -0.012 BPB**
 
 ---
 
-## Phase 3: Training Changes
+## Phase 3: Training Schedule (Approach #2)
 
-### Step 3.1: Implement SAQ (Approach #2C)
+### Step 3.1: Implement EphemeralLoRA
 
-**Files modified:** `train_gpt.py` — CastedLinear class, training loop
-
-**Tasks:**
-1. Modify `CastedLinear.forward()` when QAT is enabled:
-   ```python
-   if self._qat_enabled and self.training:
-       # Standard fake quantize
-       w_q = fake_quantize_int6(w)
-       loss = F.linear(x, w_q)
-
-       # SAQ: compute perturbation direction
-       # (requires loss.backward() first, then ascent step)
-       # This is tricky because we're inside the forward pass
-   ```
-
-   **Better approach:** Implement SAQ at the training loop level, not inside CastedLinear:
-   ```python
-   # In training loop, when late QAT is active:
-   # Step 1: normal forward + backward
-   loss = model(x, y)
-   loss.backward()
-
-   # Step 2: compute perturbation
-   with torch.no_grad():
-       for p in qat_params:
-           epsilon = rho * (p.grad / (p.grad.norm() + 1e-8))
-           p.data.add_(epsilon)
-
-   # Step 3: perturbed forward + backward (this replaces the gradient)
-   optimizer.zero_grad()
-   loss_saq = model(x, y)
-   loss_saq.backward()
-
-   # Step 4: undo perturbation
-   with torch.no_grad():
-       for p in qat_params:
-           p.data.sub_(epsilon)
-
-   # Step 5: optimizer step with SAQ gradient
-   optimizer.step()
-   ```
-
-2. Add env vars: `SAQ_ENABLED=1`, `SAQ_RHO=0.03`
-3. Only activate when `late_qat_threshold` is triggered (last ~520 steps)
-
-**Training cost:** 2× compute during the last ~520 steps = ~7.5% overhead = ~520 fewer total steps
-
-**Estimated lines:** ~25 new lines in training loop
-
-### Step 3.2: Implement Meta-Warmdown (Approach #3)
-
-**Files modified:** `train_gpt.py` — training loop, new LoRA module, eval loop
+**Files:** `train_gpt.py` new class (~30 lines)
 
 **Tasks:**
-1. Add `EphemeralLoRA` module:
-   ```python
-   class EphemeralLoRA:
-       def __init__(self, model, rank=8, target_modules=['c_q', 'c_v', 'proj']):
-           self.adapters = {}  # name → (A, B) pairs
-           for name, module in model.named_modules():
-               if any(t in name for t in target_modules) and hasattr(module, 'weight'):
-                   in_dim, out_dim = module.weight.shape[1], module.weight.shape[0]
-                   A = torch.randn(rank, in_dim, device=module.weight.device) * 0.01
-                   B = torch.zeros(out_dim, rank, device=module.weight.device)
-                   self.adapters[name] = (nn.Parameter(A), nn.Parameter(B))
+1. Create `EphemeralLoRA` class with forward hooks on Q, V, Out projections
+2. Support `apply()` (register hooks) and `remove()` (deregister hooks)
+3. Support `parameters()` for inner loop optimization
+4. Support `zero_init()` for resetting between meta-steps
 
-       def apply(self):
-           # Add LoRA to model forward hooks
+**Testing:**
+- Verify hooks add LoRA perturbation to attention output
+- Verify removal restores original forward behavior
+- Verify gradients flow through LoRA params in inner loop
 
-       def remove(self):
-           # Remove hooks
+### Step 3.2: Implement Meta-Warmdown Loop
 
-       def parameters(self):
-           return [p for a, b in self.adapters.values() for p in [a, b]]
-
-       def zero_init(self):
-           for a, b in self.adapters.values():
-               nn.init.normal_(a, std=0.01)
-               nn.init.zeros_(b)
-   ```
-
-2. Modify warmdown training loop:
-   ```python
-   if meta_warmdown_enabled and scale < meta_threshold:
-       # Split batch
-       x_sup, y_sup = x[:B//2], y[:B//2]
-       x_qry, y_qry = x[B//2:], y[B//2:]
-
-       # Inner loop: adapt LoRA on support set
-       lora = EphemeralLoRA(base_model, rank=8)
-       lora.apply()
-       loss_sup = model(x_sup, y_sup)
-       lora_grad = torch.autograd.grad(loss_sup, lora.parameters())
-       with torch.no_grad():
-           for p, g in zip(lora.parameters(), lora_grad):
-               p.sub_(alpha_inner * g)
-
-       # Outer loop: compute query loss with adapted LoRA
-       loss_qry = model(x_qry, y_qry)
-       loss_qry.backward()  # gradients flow to base model θ, NOT to LoRA
-
-       lora.remove()
-       # Normal optimizer step on base model
-       for opt in optimizers:
-           opt.step()
-   ```
-
-3. Modify eval TTT:
-   ```python
-   # Same LoRA architecture, but now the base model responds better to LoRA adaptation
-   # because it was meta-trained for this
-   ```
-
-4. Add env vars: `META_WARMDOWN=1`, `META_THRESHOLD=0.15`, `META_LORA_RANK=8`, `META_ALPHA_INNER=0.01`
-
-**Estimated lines:** ~80-120 new lines
-
-### Step 3.3: Implement Low-Rank Deep Model (Approach #4)
-
-**Files modified:** `train_gpt.py` — model architecture (GPT class, MLP class, parameter banks)
+**Files:** `train_gpt.py` training loop (~line 967)
 
 **Tasks:**
-1. Add `LowRankLinear` module (see approach doc)
-2. Add `LowRankMLP` module that uses `LowRankLinear` for fc and proj
-3. Modify GPT class:
-   - Change `NUM_LAYERS` from 11 to 18
-   - Replace MLP construction with LowRankMLP(rank=128)
-   - Update U-Net skip connections for 18 layers (9 encoder + 9 decoder)
-   - Update parameter banking for 18 layers
-4. Modify Parallel Muon to handle the thin factor banks:
-   - `mlp_up_A_bank`: (18, 512, 128)
-   - `mlp_up_B_bank`: (18, 128, 1536)
-   - `mlp_down_A_bank`: (18, 1536, 128)
-   - `mlp_down_B_bank`: (18, 128, 512)
-5. Update quantization to handle low-rank factors:
-   - Option A: quantize A and B separately (int6 each)
-   - Option B: materialize W=A·B, then quantize W with GPTQ
-   - Option B is better (GPTQ sees the actual weight distribution)
-6. Add env vars: `MLP_RANK=128`, `NUM_LAYERS=18`
+1. When `scale < meta_threshold` (warmdown active):
+   a. Split batch into support/query halves
+   b. Create EphemeralLoRA, adapt on support with 1 SGD step
+   c. Compute query loss with adapted LoRA
+   d. Backward through base model (Muon gradient)
+   e. Remove LoRA, step optimizer
+2. Handle `torch.compile` compatibility (may need to disable dynamo for meta steps)
+3. Handle gradient accumulation (meta-step uses half the batch for each phase)
 
-**Testing strategy:**
-- First test 13 layers with rank=192 (conservative)
-- If it works, push to 18 layers with rank=128
-- Monitor: pre-quant BPB, post-quant BPB, artifact size, step time
+**Critical concern:** The batch split halves the effective batch size for each phase. This may increase gradient noise. Mitigation: increase grad_accum_steps during meta-warmdown.
 
-**Estimated lines:** ~60-80 modified lines (replacing MLP class, updating GPT init and forward)
+**Testing:**
+- A/B test: train two models (standard warmdown vs meta-warmdown)
+- Run identical LoRA TTT on both
+- Compare TTT gain: meta-warmdown should show >1.5x improvement
 
 ### Phase 3 Checkpoint
 
-After Phase 3, we have the full stack. Run complete experiments on 8×H100:
-- Baseline: current SOTA (1.1147)
-- + Phase 1 only (eval changes)
-- + Phase 1+2 (eval + post-training)
-- + Phase 1+2+3 (everything)
+Run full training with Phase 1+2+3. Measure TTT gain improvement.
 
-**Expected cumulative improvement: -0.015 to -0.035 BPB → target BPB: 1.08-1.10**
+**Expected cumulative: -0.008 to -0.018 BPB**
 
 ---
 
-## Testing Without 8×H100
+## Phase 4: Architecture Changes (Approaches #1 and #3)
 
-For local development/testing on Apple Silicon or smaller GPUs:
+**Note: Approaches #1 and #3 are alternatives, not complements.** Both aim to fit more layers in 16MB, but via different mechanisms:
+- #1: Low-rank MLP factors -> 18 layers
+- #3: SVD quantized factors -> 13 layers
 
-1. **Unit tests**: Each approach can be tested independently on a tiny model (2 layers, dim=64, vocab=32)
-2. **Integration test**: Run the full pipeline on the MLX baseline with `ITERATIONS=50 TRAIN_BATCH_TOKENS=256`
+Implement both, test both, pick the winner. They cannot be combined (you'd be double-compressing the MLP).
+
+### Step 4.1a: Implement Low-Rank Deep Model (Approach #1)
+
+**Files:** `train_gpt.py` MLP class, GPT class, Parallel Muon
+
+**Tasks:**
+1. Add `LowRankLinear(in_dim, out_dim, rank)` module
+2. Replace MLP `fc` and `proj` with `LowRankLinear`
+3. Change `NUM_LAYERS` from 11 to 18
+4. Update U-Net skip connections for 18 layers
+5. Update parameter banks for factor shapes
+6. At GPTQ time: materialize W = A @ B, then quantize
+
+**Testing:**
+- Verify parameter count is within 16MB at int6+LZMA
+- Verify Muon processes thin factors correctly
+- Compare BPB: 18L low-rank vs 11L full-rank
+
+### Step 4.1b: Implement SVD Quantized Factors (Approach #3)
+
+**Files:** `train_gpt.py` QAT section, quantization section
+
+**Tasks:**
+1. Add `svd_quantize_ste()` function for SVD-aware fake quantization
+2. Replace int6 STE in CastedLinear with SVD-aware STE during QAT
+3. Add `quantize_svd_factors()` for post-training export
+4. Add `dequantize_svd_factors()` for inference
+5. Change `NUM_LAYERS` from 11 to 13 (funded by SVD savings)
+
+**Testing:**
+- Measure spectral decay of trained weights (compute E(256) for each layer)
+- Compare compression: SVD factors + LZMA vs int6 + LZMA
+- Compare BPB: 13L SVD vs 11L int6
+
+### Step 4.2: Pick Winner
+
+Compare:
+- Approach #1: 18L low-rank (expected -0.004 to -0.010)
+- Approach #3: 13L SVD (expected -0.002 to -0.006)
+
+The winner gets integrated with Phase 1+2+3.
+
+### Phase 4 Checkpoint
+
+Run full stack (Phase 1+2+3+4). Measure final BPB.
+
+**Expected cumulative: -0.012 to -0.025 BPB -> target 1.090-1.103**
+
+---
+
+## Approach Interactions and Conflicts
+
+### Positive Interactions (approaches enhance each other)
+
+| Pair | Interaction |
+|------|------------|
+| #5 + everything | Faster training benefits all approaches |
+| #4 + #1 or #3 | MTP auxiliary gradients are especially valuable for deeper models (more layers to train) |
+| #2 + #4 | MTP-trained backbone may adapt better to TTT (richer representations) |
+
+### Negative Interactions (approaches conflict)
+
+| Pair | Conflict | Resolution |
+|------|----------|-----------|
+| #1 and #3 | Both change architecture for depth; cannot combine | Pick winner |
+| #5 FP8 + #2 meta | FP8 precision + meta-gradient noise may compound | Disable FP8 during meta-warmdown phase |
+| #4 MTP + #5 FP8 | MTP overhead + FP8 overhead may exceed budget | Run MTP heads in bf16 (small), main model in FP8 |
+
+### Neutral Interactions (orthogonal)
+
+| Pair | Why Independent |
+|------|----------------|
+| #2 + #5 | Meta-warmdown schedule is independent of training speed |
+| #4 + #3 | Loss function is independent of quantization method |
+
+---
+
+## File Modification Summary
+
+All modifications are to `train_gpt.py` (the single-file training script).
+
+| Section | Approaches Touching It | Lines Changed |
+|---------|----------------------|---------------|
+| Muon optimizer (~96-168) | #5 (GNS) | ~15 |
+| CastedLinear (~509-513) | #5 (FP8), #3 (SVD QAT) | ~30 |
+| MLP class (~606-617) | #1 (low-rank) | ~15 |
+| GPT class (~648-724) | #1 (layers, U-Net), #4 (MTP heads) | ~30 |
+| Training loop (~922-1060) | #2 (meta-warmdown), #4 (BPB loss) | ~60 |
+| Quantization (~288-422) | #3 (SVD factors) | ~60 |
+| Export/eval (~1062-1127) | #4 (strip MTP heads) | ~10 |
+| New classes/functions | #1 (LowRankLinear), #2 (EphemeralLoRA), #3 (SVD quant) | ~80 |
+| **Total** | | **~300 lines** |
+
+The baseline script is ~1127 lines. With ~300 lines of additions (and ~50 lines removed/replaced), the modified script would be ~1380 lines -- under the 1500-line hard cap.
+
+---
+
+## Testing Strategy (Without 8xH100)
+
+### Local Testing (Apple Silicon / Single GPU)
+
+1. **Unit tests for each approach** (can run on CPU/MPS):
+   - GNS: verify output matches NS5
+   - FP8: skip (requires H100)
+   - LowRankLinear: verify forward matches A@B@x
+   - EphemeralLoRA: verify hook registration/removal
+   - MTP: verify loss includes all K+1 terms
+   - SVD QAT: verify SVD truncation + factor quantization
+   - BPB weighting: verify weights sum to T (normalized)
+
+2. **Integration test** (tiny model, 50 steps):
+   ```bash
+   NUM_LAYERS=3 MODEL_DIM=64 VOCAB_SIZE=32 ITERATIONS=50 \
+   TRAIN_BATCH_TOKENS=256 MTP_K=3 BPB_WEIGHTED_LOSS=1 \
+   META_WARMDOWN=1 MLP_RANK=16 GNS_ENABLED=1 \
+   python train_gpt.py
+   ```
+
 3. **Correctness checks**:
-   - EWMA-gram: verify P_final sums to 1, counters update correctly
-   - Klein-GPTQ: verify MSE decreases with more trials
-   - Adaptive stride: verify token classification matches NLL distribution
-   - SAQ: verify perturbation direction is correct (should increase loss)
-   - Low-rank: verify LowRankLinear(512, 1536, 128) output matches (A@B)@x
+   - Training loss decreases (with MTP, total loss includes auxiliary terms)
+   - No NaN/Inf in gradients
+   - Artifact size within 16MB budget
 
----
+### Cloud Testing (8xH100)
 
-## File Organization
+Each approach requires one 10-min run for validation:
 
-```
-parameter-golf-bunny/
-├── approaches/
-│   ├── 01_ewma_gram.md
-│   ├── 02_geometry_pipeline.md
-│   ├── 03_meta_warmdown_ttt.md
-│   ├── 04_lowrank_deep_model.md
-│   ├── 05_adaptive_stride.md
-│   └── IMPLEMENTATION_PLAN.md      ← this file
-├── code_analysis.md
-├── done.md
-└── train_gpt.py                    ← our modified version (on bunny/work branch)
-```
+| Experiment | Config | Purpose | Time |
+|-----------|--------|---------|------|
+| Baseline | Current SOTA | Control | 10 min |
+| +GNS+FP8 | Approach #5 only | Measure speedup + BPB | 10 min |
+| +MTP+BPB | #5 + #4 | Measure loss function improvement | 10 min |
+| +Meta-WD | #5 + #4 + #2 | Measure meta-warmdown TTT gain | 10+10 min (A/B) |
+| +LowRank | #5 + #4 + #1 (18L) | Measure depth gain | 10 min |
+| +SVD | #5 + #4 + #3 (13L) | Measure SVD gain | 10 min |
+| Full stack | Best combo | Final submission | 10 min |
 
----
-
-## Timeline Estimate
-
-| Phase | Approaches | Time | Requires GPU? |
-|-------|-----------|------|---------------|
-| Phase 1 | #5 + #1 (eval-only) | 5-7 hours | Only for BPB measurement |
-| Phase 2 | #2A + #2B (post-training) | 4-6 hours | Only for BPP measurement |
-| Phase 3a | #2C (SAQ) | 2-3 hours | Yes (retraining) |
-| Phase 3b | #3 (Meta-Warmdown) | 4-6 hours | Yes (retraining) |
-| Phase 3c | #4 (Low-Rank Deep) | 6-8 hours | Yes (retraining) |
-| **Total** | **All 5** | **21-30 hours** | |
-
-**Critical path**: Phase 1+2 can be implemented locally. Phase 3 requires 8×H100 access for validation.
+**Total cloud budget: ~80 minutes of 8xH100 time (8 runs)**
 
 ---
 
 ## Success Criteria
 
-| Milestone | BPB Target | Approaches Active |
-|-----------|-----------|-------------------|
-| Phase 1 done | 1.107-1.112 | #5 + #1 |
-| Phase 2 done | 1.102-1.108 | #5 + #1 + #2A + #2B |
-| SAQ added | 1.098-1.105 | + #2C |
-| Meta-TTT added | 1.093-1.100 | + #3 |
-| Low-Rank Deep | 1.080-1.095 | + #4 |
+| Milestone | BPB Target | Approaches Active | Confidence |
+|-----------|-----------|-------------------|------------|
+| Phase 1 done | 1.109-1.113 | #5 (throughput) | HIGH |
+| Phase 2 done | 1.104-1.110 | #5 + #4 (loss) | MEDIUM-HIGH |
+| Phase 3 done | 1.100-1.107 | #5 + #4 + #2 (meta-warmdown) | MEDIUM |
+| Phase 4 done | 1.090-1.103 | #5 + #4 + #2 + best of #1/#3 | MEDIUM |
 
-**Minimum viable submission**: Phase 1+2 (eval+post-training changes only). If this yields < 1.110 BPB (beating current SOTA of 1.1147), submit immediately.
+**Minimum viable submission:** Phase 1 (GNS+FP8 only). If this yields < 1.112 BPB (improving over SOTA 1.1147 after 3-seed validation), submit immediately.
+
+**Target submission:** Full stack at < 1.105 BPB.
+
+---
+
+## Timeline
+
+| Phase | Approaches | Implementation Time | GPU Time |
+|-------|-----------|-------------------|----------|
+| Phase 1 | #5 GNS+FP8 | 4-6 hours | 20 min |
+| Phase 2 | #4 MTP+BPB loss | 4-6 hours | 10 min |
+| Phase 3 | #2 Meta-warmdown | 6-8 hours | 20 min |
+| Phase 4 | #1 or #3 (architecture) | 6-8 hours each | 20 min |
+| Integration | All combined | 2-4 hours | 10 min |
+| **Total** | | **22-32 hours** | **80 min** |
+
+**Critical path:** Phase 1 -> Phase 2 -> Phase 3 -> Phase 4 (sequential, each builds on previous).
+Phase 4's two architecture approaches (#1 and #3) can be implemented in parallel.
