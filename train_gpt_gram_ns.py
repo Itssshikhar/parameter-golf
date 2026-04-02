@@ -30,20 +30,24 @@ try:
     _ATTN_BACKEND = "fa3"
 except ImportError:
     try:
-        from flash_attn import flash_attn_func as flash_attn_3_func
-        _ATTN_BACKEND = "fa2"
+        from flash_attn.flash_attn_interface import flash_attn_func as flash_attn_3_func
+        _ATTN_BACKEND = "fa3"
     except ImportError:
-        def flash_attn_3_func(q, k, v, causal=True):
-            # q,k,v: (B, T, H, D) -> transpose to (B, H, T, D) for SDPA
-            q_t = q.transpose(1, 2)
-            k_t = k.transpose(1, 2)
-            v_t = v.transpose(1, 2)
-            y = F.scaled_dot_product_attention(
-                q_t, k_t, v_t, attn_mask=None, is_causal=causal,
-                enable_gqa=(q.size(2) != k.size(2)),
-            )
-            return y.transpose(1, 2)  # back to (B, T, H, D)
-        _ATTN_BACKEND = "sdpa"
+        try:
+            from flash_attn import flash_attn_func as flash_attn_3_func
+            _ATTN_BACKEND = "fa2"
+        except ImportError:
+            def flash_attn_3_func(q, k, v, causal=True):
+                # q,k,v: (B, T, H, D) -> transpose to (B, H, T, D) for SDPA
+                q_t = q.transpose(1, 2)
+                k_t = k.transpose(1, 2)
+                v_t = v.transpose(1, 2)
+                y = F.scaled_dot_product_attention(
+                    q_t, k_t, v_t, attn_mask=None, is_causal=causal,
+                    enable_gqa=(q.size(2) != k.size(2)),
+                )
+                return y.transpose(1, 2)  # back to (B, T, H, D)
+            _ATTN_BACKEND = "sdpa"
 class Hyperparameters:
     data_path = os.environ.get("DATA_PATH", "./data/datasets/fineweb10B_sp1024")
     train_files = os.path.join(data_path, "fineweb_train_*.bin")
@@ -221,7 +225,7 @@ def zeropower_via_newtonschulz5(G: Tensor, steps: int = 5, eps: float = 1e-7) ->
         X = _gram_newtonschulz(X, coefficients, restart_at=frozenset({2}))
 
     if transposed:
-        X = X.mT
+        X = X.mT.contiguous()
     if was_2d:
         X = X.squeeze(0)
     return X

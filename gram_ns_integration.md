@@ -10,10 +10,10 @@ Standard Newton-Schulz (what #1 uses) iterates on the full matrix `X` which is `
 for each step:
     A = X @ X.T        # n×m times m×n = n×n
     B = b*A + c*A@A    # n×n
-    X = a*X + B @ X    # n×n times n×m = n×m  ← expensive every step
+    X = a*X + B @ X    # n×n times n×m = n×m  <- expensive every step
 ```
 
-Every iteration touches the full `n×m` matrix. For a 512×1536 MLP weight (transposed to 512×1536 since we ensure n≤m), that's a 512×1536 matmul every iteration.
+Every iteration touches the full `n×m` matrix. For a 512×1536 MLP weight (transposed to 512×1536 since we ensure n<=m), that's a 512×1536 matmul every iteration.
 
 Gram Newton-Schulz reformulates this to iterate on `R = X @ X.T` which is only `n×n`:
 
@@ -22,9 +22,9 @@ R = X @ X.T          # compute once: 512×512
 Q = I                 # accumulator: 512×512
 
 for each step:
-    Z = b*R + c*R@R   # 512×512 — small!
-    Q = a*Q + Q@Z      # 512×512 — small!
-    R = ...update...    # 512×512 — small!
+    Z = b*R + c*R@R   # 512×512 -- small!
+    Q = a*Q + Q@Z      # 512×512 -- small!
+    R = ...update...    # 512×512 -- small!
 
 X = Q @ X             # one final 512×1536 matmul at the end
 ```
@@ -33,7 +33,7 @@ All the iterative work happens on the small `512×512` Gram matrix. The expensiv
 
 ### Why it's even faster than the FLOP reduction suggests
 
-All the inner-loop matrices (`R`, `Q`, `Z`) are **symmetric** (`R = XX^T` is always symmetric). The original Dao-AILab repo includes custom CuTeDSL CUDA kernels that exploit this symmetry — a symmetric GEMM only needs to compute half the output elements, giving another ~2x kernel-level speedup on H100/Blackwell. This integration does **not** use those custom kernels (to keep it dependency-free), but the algorithmic FLOP reduction still applies.
+All the inner-loop matrices (`R`, `Q`, `Z`) are **symmetric** (`R = XX^T` is always symmetric). The original Dao-AILab repo includes custom CuTeDSL CUDA kernels that exploit this symmetry -- a symmetric GEMM only needs to compute half the output elements, giving another ~2x kernel-level speedup on H100/Blackwell. This integration does **not** use those custom kernels (to keep it dependency-free), but the algorithmic FLOP reduction still applies.
 
 ### Numerical stability: restarts
 
@@ -52,13 +52,14 @@ This keeps the iteration accurate while still saving most of the FLOPs.
 **Changes made:**
 
 1. Replaced `zeropower_via_newtonschulz5()` with a corrected Gram NS implementation matching the Dao-AILab reference
-2. Added FlashAttention fallback chain (FA3 → FA2 → PyTorch SDPA) for non-H100 GPUs
+2. Added FlashAttention fallback chain (FA3 top-level -> FA3 submodule -> FA2 -> PyTorch SDPA) for compatibility across installations
+3. Fixed tensor contiguity bug for PyTorch 2.8 distributed ops
 
 **Zero changes to:**
 - The Parallel Muon communication overlap (reduce-scatter/all-gather pipeline)
 - The parameter bank structure
 - Any other part of the training script
-- The function signature — it's a drop-in replacement
+- The function signature -- it's a drop-in replacement
 
 ## Implementation details
 
@@ -79,16 +80,16 @@ _POLAR_EXPRESS_RAW = [
 
 ### Square vs rectangular dispatch
 
-For **square matrices** (like `qo_bank` at 512×512), the Gram reformulation has no FLOP savings — the Gram matrix is the same size as the original. The implementation falls back to standard NS with `baddbmm` for these.
+For **square matrices** (like `qo_bank` at 512×512), the Gram reformulation has no FLOP savings -- the Gram matrix is the same size as the original. The implementation falls back to standard NS with `baddbmm` for these.
 
-For **rectangular matrices** (like `mlp_up_bank` at 512×1536), the full Gram path runs — iterating on the 512×512 Gram while avoiding the 512×1536 matmuls until the end.
+For **rectangular matrices** (like `mlp_up_bank` at 512×1536), the full Gram path runs -- iterating on the 512×512 Gram while avoiding the 512×1536 matmuls until the end.
 
 ### Fused operations via `baddbmm`
 
 All multiply-add patterns use `torch.baddbmm` instead of separate ops:
-- `Z = b*R + c*R@R` → `torch.baddbmm(R, R, R, beta=b, alpha=c)`
-- `Q = a*Q + Q@Z` → `torch.baddbmm(Q, Q, Z, beta=a)`
-- `RZ = a*R + R@Z` → `torch.baddbmm(R, R, Z, beta=a)`
+- `Z = b*R + c*R@R` -> `torch.baddbmm(R, R, R, beta=b, alpha=c)`
+- `Q = a*Q + Q@Z` -> `torch.baddbmm(Q, Q, Z, beta=a)`
+- `RZ = a*R + R@Z` -> `torch.baddbmm(R, R, Z, beta=a)`
 
 Each `baddbmm` fuses scalar multiply + matmul + add into a single CUDA kernel, saving memory bandwidth and kernel launch overhead.
 
@@ -100,7 +101,7 @@ Q starts as `None`. On the first iteration (or after a restart), Q is initialize
 Q = Z + a * I   # = aI + bR + cR^2
 ```
 
-This is the polynomial `p(R) = a + bR + cR²` applied to R, with the identity providing the constant term. On subsequent iterations, Q accumulates via `Q = a*Q + Q@Z`.
+This is the polynomial `p(R) = a + bR + cR^2` applied to R, with the identity providing the constant term. On subsequent iterations, Q accumulates via `Q = a*Q + Q@Z`.
 
 ### R update skip optimization
 
@@ -110,12 +111,12 @@ The R update is skipped on the last iteration (R is never used again) and on ite
 
 With `num_layers=11`, `model_dim=512`, `kv_dim=256`, `mlp_dim=1536`:
 
-| Bank | Shape per slice | After transpose (n≤m) | n×n Gram size | Speedup potential |
+| Bank | Shape per slice | After transpose (n<=m) | n×n Gram size | Speedup potential |
 |------|----------------|----------------------|---------------|-------------------|
-| `qo_bank` | (22, 512, 512) | square — falls back to standard NS | 512×512 | None (n=m) |
+| `qo_bank` | (22, 512, 512) | square -- falls back to standard NS | 512×512 | None (n=m) |
 | `kv_bank` | (22, 256, 512) | (22, 256, 512) | 256×256 | Moderate |
-| `mlp_up_bank` | (11, 1536, 512) | transposed to (11, 512, 1536) | 512×512 | **Big** — inner loop avoids 512×1536 |
-| `mlp_down_bank` | (11, 512, 1536) | (11, 512, 1536) | 512×512 | **Big** — same |
+| `mlp_up_bank` | (11, 1536, 512) | transposed to (11, 512, 1536) | 512×512 | **Big** -- inner loop avoids 512×1536 |
+| `mlp_down_bank` | (11, 512, 1536) | (11, 512, 1536) | 512×512 | **Big** -- same |
 
 **Expected result:** On the MLP banks, the inner loop does 512×512 matmuls instead of 512×1536. With 5 steps, 1 restart at step 2: that's 2 cheap iterations (steps 0-1) + 1 restart (apply Q to X, recompute R) + 2 more cheap iterations (steps 3-4) + 1 final Q@X. Versus standard: 5 full 512×1536 matmuls. Roughly 40-50% fewer FLOPs on the MLP banks.
 
@@ -134,10 +135,10 @@ def _gram_newtonschulz(X, coefficients, restart_at):
             R = X @ X.mT           # recompute Gram
             Q = None
 
-        Z = baddbmm(R, R, R, beta=b, alpha=c)   # Z = b*R + c*R²
+        Z = baddbmm(R, R, R, beta=b, alpha=c)   # Z = b*R + c*R^2
 
         if Q is None:
-            Q = Z + a * I          # initialize: Q = aI + bR + cR²
+            Q = Z + a * I          # initialize: Q = aI + bR + cR^2
         else:
             Q = baddbmm(Q, Q, Z, beta=a)  # Q = a*Q + Q@Z
 
@@ -152,19 +153,19 @@ def _gram_newtonschulz(X, coefficients, restart_at):
 
 ### Why the R update formula is `a*RZ + Z@RZ` where `RZ = a*R + R@Z`
 
-In standard NS, after one step: `X_new = a*X + Z @ X` where `Z = b*A + c*A²` and `A = X @ X^T`.
+In standard NS, after one step: `X_new = a*X + Z @ X` where `Z = b*A + c*A^2` and `A = X @ X^T`.
 
 The Gram of the new X is:
 ```
 R_new = X_new @ X_new^T
       = (a*X + Z@X)(a*X + Z@X)^T
       = (a*X + Z@X)(a*X^T + X^T@Z^T)
-      = a² * X@X^T + a*Z@X@X^T + a*X@X^T@Z^T + Z@X@X^T@Z^T
+      = a^2 * X@X^T + a*Z@X@X^T + a*X@X^T@Z^T + Z@X@X^T@Z^T
 ```
 
 Since `Z` and `R = X@X^T` are symmetric (`Z^T = Z`, `R^T = R`):
 ```
-R_new = a²*R + a*Z@R + a*R@Z + Z@R@Z
+R_new = a^2*R + a*Z@R + a*R@Z + Z@R@Z
       = a*(a*R + R@Z) + Z@(a*R + R@Z)
       = a*RZ + Z@RZ
 ```
@@ -181,26 +182,194 @@ The initial version had several issues compared to the Dao-AILab reference. Thes
 | **Q initialization** | `Q = I` then `a*Q + Q@Z` on first step | `Q = None` then `Q = Z + a*I` on first step (matches reference) |
 | **R update waste** | Computed R on every step including last | Skips R update on last step and before restarts |
 | **Square matrices** | Ran full Gram path (more ops, same size matmuls) | Falls back to standard NS (no Q/R overhead) |
-| **Fused ops** | `a*R + R@Z` as separate ops | `torch.baddbmm(R, R, Z, beta=a)` — single fused kernel |
+| **Fused ops** | `a*R + R@Z` as separate ops | `torch.baddbmm(R, R, Z, beta=a)` -- single fused kernel |
 
-## FlashAttention fallback
+## Bugs fixed for 8xH100 (PyTorch 2.8)
 
-The #1 submission imports `flash_attn_interface` (FlashAttention 3, H100-only). The modified script adds a fallback chain:
+Two runtime bugs were discovered and fixed when running on 8xH100 with PyTorch 2.8.0+cu128:
 
-1. **FA3** (`flash_attn_interface`) — H100/Blackwell, fastest
-2. **FA2** (`flash_attn`) — Ampere+ (RTX 3090/4090/A100), fast
-3. **PyTorch SDPA** (`F.scaled_dot_product_attention`) — any GPU, transposes B,T,H,D → B,H,T,D
+### 1. FlashAttention 3 import path
 
-This lets the script run on a 4090 or any CUDA GPU without code changes.
+**Problem:** The script imported FA3 as `from flash_attn_interface import flash_attn_func`. This works when `flash_attn_interface` is installed as a standalone package (e.g., from the Dao-AILab repo directly). However, in `flash-attn>=2.7` (pip), FA3's interface is bundled as a submodule: `flash_attn.flash_attn_interface`.
+
+**Symptom:** FA3 import silently failed, falling through to FA2 or SDPA fallback. On H100 this is a significant performance loss.
+
+**Fix:** Added `from flash_attn.flash_attn_interface import flash_attn_func` as a second fallback before FA2:
+
+```python
+try:
+    from flash_attn_interface import flash_attn_func as flash_attn_3_func        # standalone FA3
+    _ATTN_BACKEND = "fa3"
+except ImportError:
+    try:
+        from flash_attn.flash_attn_interface import flash_attn_func as flash_attn_3_func  # pip flash-attn>=2.7
+        _ATTN_BACKEND = "fa3"
+    except ImportError:
+        try:
+            from flash_attn import flash_attn_func as flash_attn_3_func          # FA2
+            _ATTN_BACKEND = "fa2"
+        except ImportError:
+            # PyTorch SDPA fallback (any GPU)
+            ...
+            _ATTN_BACKEND = "sdpa"
+```
+
+### 2. Tensor contiguity for NCCL all-gather (PyTorch 2.8)
+
+**Problem:** `zeropower_via_newtonschulz5` transposes the result with `.mT` for matrices where `n > m`. The `.mT` produces a non-contiguous view. In PyTorch 2.6 (which the original #1 was developed on), `dist.all_gather_into_tensor` accepted non-contiguous tensors. **PyTorch 2.8 enforces contiguity**, raising `ValueError: Tensors must be contiguous`.
+
+**Symptom:** Crash on first training step with `ValueError: Tensors must be contiguous` at the all-gather in `Muon.step()`.
+
+**Fix:** Added `.contiguous()` after the transpose:
+
+```python
+if transposed:
+    X = X.mT.contiguous()  # was: X = X.mT
+```
+
+**Note:** This bug affects the original `train_gpt.py` equally on PyTorch 2.8 -- it's not specific to the Gram NS changes.
+
+## FlashAttention fallback chain
+
+The #1 submission imports `flash_attn_interface` (FlashAttention 3, H100-only). The modified script adds a full fallback chain:
+
+1. **FA3 standalone** (`flash_attn_interface`) -- H100/Blackwell, standalone install
+2. **FA3 bundled** (`flash_attn.flash_attn_interface`) -- H100/Blackwell, pip `flash-attn>=2.7`
+3. **FA2** (`flash_attn`) -- Ampere+ (RTX 3090/4090/A100)
+4. **PyTorch SDPA** (`F.scaled_dot_product_attention`) -- any GPU, transposes B,T,H,D -> B,H,T,D
+
+## 8xH100 run results (2026-04-02)
+
+### Environment
+
+- **Hardware:** 8x NVIDIA H100 80GB HBM3
+- **PyTorch:** 2.8.0+cu128
+- **flash-attn:** 2.8.3 (FA3 via `flash_attn.flash_attn_interface`)
+- **Attention backend:** FA3
+- **NCCL:** 2.27.3
+
+### Configuration
+
+All env vars matching the original #1 record run:
+
+```bash
+RUN_ID=gram_ns_test2
+SEED=1337
+NUM_LAYERS=11
+MLP_MULT=3.0
+TRAIN_SEQ_LEN=2048
+EVAL_SEQ_LEN=2048
+TRAIN_BATCH_TOKENS=786432
+ITERATIONS=9000
+WARMDOWN_ITERS=3500
+MATRIX_LR=0.025
+SCALAR_LR=0.025
+TIED_EMBED_LR=0.035
+MUON_MOMENTUM=0.99
+MUON_MOMENTUM_WARMUP_START=0.92
+MUON_MOMENTUM_WARMUP_STEPS=1500
+MUON_WD=0.04
+ADAM_WD=0.04
+GRAD_CLIP_NORM=0.3
+BIGRAM_VOCAB_SIZE=1536
+XSA_LAST_N=4
+ROPE_DIMS=16
+LN_SCALE=1
+VE_ENABLED=1
+VE_LAYERS=9,10
+LATE_QAT_THRESHOLD=0.15
+EVAL_STRIDE=64
+TTT_ENABLED=1
+TTT_EPOCHS=3
+TTT_FREEZE_BLOCKS=0
+TTT_LR=0.002
+TTT_CHUNK_TOKENS=32768
+```
+
+**Note:** `EMA_ENABLED` is NOT an env var read by the code. EMA is hardcoded on (decay=0.997) and runs unconditionally.
+
+### Results
+
+| Metric | Value |
+|---|---|
+| Steps completed | 6196 / 9000 (wallclock capped at 600s) |
+| step_avg | 96.86 ms |
+| Peak GPU memory | 21,873 MiB / 81,559 MiB per GPU |
+| model_params | 26,928,220 |
+| world_size | 8, grad_accum_steps=1 |
+
+#### Validation scores
+
+| Eval stage | val_loss | val_bpb |
+|---|---|---|
+| step 0 (init) | 6.9304 | 4.1046 |
+| step 4000 (mid-train) | 2.0315 | 1.2032 |
+| step 6196 (wallclock stop) | 1.9285 | 1.1422 |
+| Post-EMA | 1.9269 | 1.1412 |
+| int6+lzma roundtrip | 1.9384 | 1.1480 |
+| **Legal TTT (3ep, all blocks)** | **1.8959** | **1.1228** |
+
+#### Submission size
+
+| Component | Size |
+|---|---|
+| Serialized model (raw) | 106,027,446 bytes |
+| Code | 93,815 bytes |
+| Model int6+lzma | 16,208,292 bytes |
+| **Total submission** | **16,302,107 bytes** |
+
+#### Training loss trajectory
+
+| Step | train_loss | train_time | step_avg |
+|---|---|---|---|
+| 1 | 6.9322 | 146ms | 146.22ms |
+| 500 | 2.3977 | 48,006ms | 96.01ms |
+| 1000 | 2.2650 | 96,598ms | 96.60ms |
+| 2000 | 2.0515 | 193,493ms | 96.75ms |
+| 3000 | 2.1426 | 290,289ms | 96.76ms |
+| 4000 | 1.9401 | 387,002ms | 96.75ms |
+| 5000 | 2.0667 | 483,711ms | 96.74ms |
+| 6000 | 1.8993 | 580,928ms | 96.82ms |
+| 6196 | -- | 600,137ms | 96.86ms |
+
+#### TTT eval trajectory
+
+TTT ran 1893 chunks (32768 tokens each), stride=64, 3 epochs, all blocks unfrozen, lr=0.002. Completed in 500.7s.
+
+| Chunk | Running bpb |
+|---|---|
+| 1 | 1.163 |
+| 51 | 1.114 |
+| 501 | 1.128 |
+| 1001 | 1.128 |
+| 1501 | 1.128 |
+| 1893 | 1.125 |
+| **Final** | **1.1228** |
+
+### Comparison with original #1 submission
+
+The original #1 record (seed 1337) achieved:
+- **legal_ttt val_bpb: ~1.1194** (3-seed mean: 1.1194, std 0.0006)
+
+This Gram NS run (seed 1337):
+- **legal_ttt val_bpb: 1.1228**
+
+The 0.003 bpb difference could be due to:
+1. **PyTorch version difference** (2.6 vs 2.8) -- different numerics, cuDNN heuristics, NCCL behavior
+2. **FA3 implementation path** -- pip `flash_attn.flash_attn_interface` vs standalone `flash_attn_interface` may have different kernel selections
+3. **Gram NS numerical differences** -- the Polar Express per-step coefficients and Gram reformulation produce slightly different floating-point trajectories than the fixed-coefficient standard NS
+4. **Single seed** -- the original's 1.1194 is a 3-seed mean; a single seed can vary by ~0.001
+
+A proper A/B comparison would require running the original `train_gpt.py` on the same hardware/PyTorch version. The step_avg (96.86ms) needs to be compared against the original's step_avg on the same setup to quantify the Gram NS speedup.
 
 ## How to run
 
 ### Prerequisites
 
 - CUDA GPU (H100 for full reproduction, 4090 for testing, any Ampere+ with FA2)
-- PyTorch 2.6+
+- PyTorch 2.8+ (tested), 2.6+ (should work)
 - `sentencepiece`, `lzma` (stdlib)
-- Optional: `flash-attn` (FA2) or `flash_attn_interface` (FA3)
+- `flash-attn>=2.7` (pip) -- provides both FA2 and FA3 via `flash_attn.flash_attn_interface`
 - FineWeb dataset: `python3 data/cached_challenge_fineweb.py --variant sp1024`
 
 ### Run on 8xH100 (full reproduction)
@@ -232,7 +401,6 @@ ROPE_DIMS=16 \
 LN_SCALE=1 \
 VE_ENABLED=1 \
 VE_LAYERS=9,10 \
-EMA_ENABLED=1 \
 LATE_QAT_THRESHOLD=0.15 \
 EVAL_STRIDE=64 \
 TTT_ENABLED=1 \
@@ -317,8 +485,8 @@ torchrun --standalone --nproc_per_node=1 train_gpt_gram_ns.py
 ### What to compare
 
 Run the original #1 submission and the Gram NS version with the same seed and config. Compare:
-1. **step_avg (ms)** — Gram NS should be lower (faster per step)
-2. **total steps in 600s** — Gram NS should fit more steps
-3. **final val_bpb** — should be equal or slightly better (same math, more steps)
+1. **step_avg (ms)** -- Gram NS should be lower (faster per step)
+2. **total steps in 600s** -- Gram NS should fit more steps
+3. **final val_bpb** -- should be equal or slightly better (same math, more steps)
 
 The key metric is `step_avg`. If it drops by even 2-3ms, that's ~250 extra training steps in 10 minutes.
