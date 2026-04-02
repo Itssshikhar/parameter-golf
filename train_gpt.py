@@ -278,6 +278,136 @@ def eval_val(
     return float(val_loss.item()), float(bits_per_token * tokens_per_byte)
 
 # -----------------------------
+# EVAL-TIME LORA TTT (TEST-TIME TRAINING)
+# -----------------------------
+
+def eval_val_sliding_ttt(
+    args: Hyperparameters,
+    base_model: nn.Module,
+    compiled_model: nn.Module,
+    model: nn.Module,
+    rank: int,
+    world_size: int,
+    device: torch.device,
+    grad_accum_steps: int,
+    val_tokens: Tensor,
+    base_bytes_lut: Tensor,
+    has_leading_space_lut: Tensor,
+    is_boundary_token_lut: Tensor,
+    ttt_lr: float = 0.002,
+    ttt_epochs: int = 3,
+    ttt_chunk_tokens: int = 32768,
+    ttt_freeze_blocks: int = 0,
+    ttt_momentum: float = 0.9,
+    ttt_grad_clip: float = 1.0,
+    lora_rank: int = 8,
+) -> tuple[float, float]:
+    """
+    Legal TTT evaluation with LoRA.
+    Score-first protocol: tokens are always scored BEFORE the model sees them in training.
+    LoRA persists across chunks (cumulative adaptation).
+    """
+    seq_len = args.train_seq_len
+
+    # Create persistent LoRA that accumulates across chunks
+    lora = EphemeralLoRA(base_model, rank=lora_rank)
+    lora.zero_init()
+
+    # Setup SGD optimizer for LoRA params
+    lora_params = lora.parameters()
+    ttt_optimizer = torch.optim.SGD(lora_params, lr=ttt_lr, momentum=ttt_momentum)
+
+    total_tokens = val_tokens.numel() - 1
+    val_loss_sum = torch.zeros((), device=device, dtype=torch.float64)
+    val_token_count = torch.zeros((), device=device, dtype=torch.float64)
+    val_byte_count = torch.zeros((), device=device, dtype=torch.float64)
+
+    # Process in chunks
+    chunk_start = 0
+    while chunk_start < total_tokens:
+        chunk_end = min(chunk_start + ttt_chunk_tokens, total_tokens)
+        chunk_len = chunk_end - chunk_start
+
+        # Ensure chunk_len is divisible by seq_len
+        usable = (chunk_len // seq_len) * seq_len
+        if usable == 0:
+            break
+        chunk_end = chunk_start + usable
+
+        chunk_tokens = val_tokens[chunk_start: chunk_end + 1].to(device=device, dtype=torch.int64)
+        x_chunk = chunk_tokens[:-1].reshape(-1, seq_len)
+        y_chunk = chunk_tokens[1:].reshape(-1, seq_len)
+
+        # STEP 1: Score chunk under inference mode (with current LoRA state)
+        lora.apply_to_model()
+        base_model.eval()
+        with torch.inference_mode():
+            with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=True):
+                # Score each sequence in the chunk
+                for seq_idx in range(x_chunk.shape[0]):
+                    x_seq = x_chunk[seq_idx:seq_idx+1]
+                    y_seq = y_chunk[seq_idx:seq_idx+1]
+                    batch_loss = base_model(x_seq, y_seq).detach()
+                    batch_token_count = float(y_seq.numel())
+                    val_loss_sum += batch_loss.to(torch.float64) * batch_token_count
+                    val_token_count += batch_token_count
+                    prev_ids = x_seq.reshape(-1)
+                    tgt_ids = y_seq.reshape(-1)
+                    token_bytes = base_bytes_lut[tgt_ids].to(dtype=torch.int16)
+                    token_bytes += (has_leading_space_lut[tgt_ids] & ~is_boundary_token_lut[prev_ids]).to(dtype=torch.int16)
+                    val_byte_count += token_bytes.to(torch.float64).sum()
+        lora.remove_from_model()
+
+        # STEP 2: Train LoRA on the scored chunk (model sees tokens AFTER scoring)
+        lora.apply_to_model()
+        base_model.train()
+
+        # Freeze all base model params, only train LoRA
+        base_param_requires_grad = {}
+        for name, p in base_model.named_parameters():
+            base_param_requires_grad[name] = p.requires_grad
+            p.requires_grad_(False)
+
+        # Enable grad for LoRA params
+        for p in lora_params:
+            p.requires_grad_(True)
+
+        for _epoch in range(ttt_epochs):
+            for seq_idx in range(x_chunk.shape[0]):
+                x_seq = x_chunk[seq_idx:seq_idx+1]
+                y_seq = y_chunk[seq_idx:seq_idx+1]
+
+                ttt_optimizer.zero_grad()
+                with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=True):
+                    loss = base_model(x_seq, y_seq)
+                loss.backward()
+                if ttt_grad_clip > 0:
+                    torch.nn.utils.clip_grad_norm_(lora_params, ttt_grad_clip)
+                ttt_optimizer.step()
+
+        # Restore base model grad settings
+        for name, p in base_model.named_parameters():
+            p.requires_grad_(base_param_requires_grad[name])
+
+        lora.remove_from_model()
+        chunk_start = chunk_end
+
+    # Cleanup
+    lora.remove_from_model()
+
+    if dist.is_available() and dist.is_initialized():
+        dist.all_reduce(val_loss_sum, op=dist.ReduceOp.SUM)
+        dist.all_reduce(val_token_count, op=dist.ReduceOp.SUM)
+        dist.all_reduce(val_byte_count, op=dist.ReduceOp.SUM)
+
+    val_loss = val_loss_sum / val_token_count
+    bits_per_token = val_loss.item() / math.log(2.0)
+    tokens_per_byte = val_token_count.item() / val_byte_count.item()
+    base_model.train()
+    return float(val_loss.item()), float(bits_per_token * tokens_per_byte)
+
+
+# -----------------------------
 # POST-TRAINING QUANTIZATION
 # -----------------------------
 #
@@ -645,6 +775,70 @@ class Block(nn.Module):
         return x
 
 
+class EphemeralLoRA(nn.Module):
+    """Lightweight LoRA adapters that can be applied/removed from CastedLinear modules."""
+
+    def __init__(self, model: nn.Module, rank: int = 8, target_patterns: list[str] | None = None):
+        super().__init__()
+        if target_patterns is None:
+            target_patterns = ['c_q', 'c_v', 'proj']
+        self.rank = rank
+        self.adapters: list[tuple[str, nn.Parameter, nn.Parameter]] = []
+        self._hooks: list[torch.utils.hooks.RemovableHandle] = []
+        self._hook_modules: list[tuple[nn.Module, nn.Parameter, nn.Parameter]] = []
+
+        for name, module in model.named_modules():
+            if not isinstance(module, CastedLinear):
+                continue
+            # Match target_patterns but exclude mlp.proj
+            matched = any(pat in name for pat in target_patterns)
+            if matched and 'mlp.proj' in name:
+                matched = False
+            if not matched:
+                continue
+            in_features = module.in_features
+            out_features = module.out_features
+            A = nn.Parameter(torch.randn(rank, in_features, device=module.weight.device, dtype=torch.float32) * 0.01)
+            B = nn.Parameter(torch.zeros(out_features, rank, device=module.weight.device, dtype=torch.float32))
+            self.adapters.append((name, A, B))
+            self._hook_modules.append((module, A, B))
+
+    def apply_to_model(self) -> None:
+        """Register forward hooks that add LoRA delta to the output."""
+        self.remove_from_model()
+        for module, A, B in self._hook_modules:
+            # Capture A, B in closure
+            def make_hook(lora_A: nn.Parameter, lora_B: nn.Parameter):
+                def hook(mod: nn.Module, input: tuple, output: Tensor) -> Tensor:
+                    # LoRA delta: x @ A^T @ B^T = F.linear(F.linear(x, A), B)
+                    x = input[0]
+                    delta = F.linear(F.linear(x.float(), lora_A), lora_B)
+                    return output + delta.to(output.dtype)
+                return hook
+            h = module.register_forward_hook(make_hook(A, B))
+            self._hooks.append(h)
+
+    def remove_from_model(self) -> None:
+        """Remove all hooks."""
+        for h in self._hooks:
+            h.remove()
+        self._hooks.clear()
+
+    def zero_init(self) -> None:
+        """Reset A to small random, B to zeros."""
+        for _name, A, B in self.adapters:
+            A.data.normal_(0, 0.01)
+            B.data.zero_()
+
+    def parameters(self) -> list[nn.Parameter]:
+        """Return all LoRA A and B params as a list."""
+        params = []
+        for _name, A, B in self.adapters:
+            params.append(A)
+            params.append(B)
+        return params
+
+
 class GPT(nn.Module):
     def __init__(
         self,
@@ -723,6 +917,31 @@ class GPT(nn.Module):
         logits = self.logit_softcap * torch.tanh(logits_proj / self.logit_softcap)
         return F.cross_entropy(logits.float(), targets, reduction="mean")
 
+    def forward_logits(self, input_ids: Tensor) -> Tensor:
+        """Forward pass returning logits instead of loss (for TTT scoring)."""
+        x = self.tok_emb(input_ids)
+        x = F.rms_norm(x, (x.size(-1),))
+        x0 = x
+        skips: list[Tensor] = []
+
+        for i in range(self.num_encoder_layers):
+            x = self.blocks[i](x, x0)
+            skips.append(x)
+        for i in range(self.num_decoder_layers):
+            if skips:
+                x = x + self.skip_weights[i].to(dtype=x.dtype)[None, None, :] * skips.pop()
+            x = self.blocks[self.num_encoder_layers + i](x, x0)
+
+        x = self.final_norm(x)
+        if self.tie_embeddings:
+            logits_proj = F.linear(x, self.tok_emb.weight)
+        else:
+            if self.lm_head is None:
+                raise RuntimeError("lm_head is required when tie_embeddings=False")
+            logits_proj = self.lm_head(x)
+        logits = self.logit_softcap * torch.tanh(logits_proj / self.logit_softcap)
+        return logits
+
 
 # -----------------------------
 # TRAINING
@@ -734,6 +953,21 @@ def main() -> None:
     code = Path(__file__).read_text(encoding="utf-8")
     args = Hyperparameters()
     zeropower_via_newtonschulz5 = torch.compile(zeropower_via_newtonschulz5)
+
+    # Meta-warmdown configuration
+    meta_warmdown = bool(int(os.environ.get("META_WARMDOWN", "0")))
+    meta_threshold = float(os.environ.get("META_THRESHOLD", "0.15"))
+    meta_lora_rank = int(os.environ.get("META_LORA_RANK", "8"))
+    meta_alpha_inner = float(os.environ.get("META_ALPHA_INNER", "0.01"))
+
+    # TTT (Test-Time Training) configuration
+    ttt_enabled = bool(int(os.environ.get("TTT_ENABLED", "0")))
+    ttt_lr = float(os.environ.get("TTT_LR", "0.002"))
+    ttt_epochs = int(os.environ.get("TTT_EPOCHS", "3"))
+    ttt_chunk_tokens = int(os.environ.get("TTT_CHUNK_TOKENS", "32768"))
+    ttt_freeze_blocks = int(os.environ.get("TTT_FREEZE_BLOCKS", "0"))
+    ttt_momentum = float(os.environ.get("TTT_MOMENTUM", "0.9"))
+    ttt_grad_clip = float(os.environ.get("TTT_GRAD_CLIP", "1.0"))
 
     # -----------------------------
     # DISTRIBUTED + CUDA SETUP
@@ -908,6 +1142,16 @@ def main() -> None:
         f"max_wallclock_seconds:{args.max_wallclock_seconds:.3f}"
     )
     log0(f"seed:{args.seed}")
+    if meta_warmdown:
+        log0(
+            f"meta_warmdown:enabled threshold:{meta_threshold} lora_rank:{meta_lora_rank} "
+            f"alpha_inner:{meta_alpha_inner}"
+        )
+    if ttt_enabled:
+        log0(
+            f"ttt:enabled lr:{ttt_lr} epochs:{ttt_epochs} chunk_tokens:{ttt_chunk_tokens} "
+            f"freeze_blocks:{ttt_freeze_blocks} momentum:{ttt_momentum} grad_clip:{ttt_grad_clip}"
+        )
 
     # -----------------------------
     # DATA LOADER & MODEL WARMUP
@@ -1008,15 +1252,87 @@ def main() -> None:
         scale = lr_mul(step, elapsed_ms)
         zero_grad_all()
         train_loss = torch.zeros((), device=device)
-        for micro_step in range(grad_accum_steps):
+
+        use_meta_step = meta_warmdown and scale < meta_threshold
+
+        if use_meta_step:
+            # --- META-LEARNING WARMDOWN STEP ---
+            # Split batch into support and query halves, do inner LoRA adaptation,
+            # then outer step on base model.
+            for micro_step in range(grad_accum_steps):
+                if distributed:
+                    model.require_backward_grad_sync = micro_step == grad_accum_steps - 1
+                x, y = train_loader.next_batch(args.train_batch_tokens, args.train_seq_len, grad_accum_steps)
+
+                # Split into support and query halves
+                n_seqs = x.shape[0]
+                half = max(n_seqs // 2, 1)
+                x_support, y_support = x[:half], y[:half]
+                x_query, y_query = x[half:], y[half:]
+                if x_query.shape[0] == 0:
+                    x_query, y_query = x_support, y_support
+
+                # Create ephemeral LoRA and zero-init
+                ephemeral_lora = EphemeralLoRA(base_model, rank=meta_lora_rank)
+                ephemeral_lora.zero_init()
+                lora_params = ephemeral_lora.parameters()
+
+                # Inner loop: forward on support half with LoRA, compute loss,
+                # manually compute gradients for LoRA params, SGD update
+                ephemeral_lora.apply_to_model()
+
+                # Freeze base model params for inner loop
+                base_grad_state = {}
+                for name, p in base_model.named_parameters():
+                    base_grad_state[name] = p.requires_grad
+                    p.requires_grad_(False)
+                for p in lora_params:
+                    p.requires_grad_(True)
+
+                with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=True):
+                    inner_loss = base_model(x_support, y_support)
+                inner_grads = torch.autograd.grad(inner_loss, lora_params, create_graph=False)
+                # SGD update on LoRA params
+                with torch.no_grad():
+                    for p, g in zip(lora_params, inner_grads):
+                        p.sub_(g, alpha=meta_alpha_inner)
+
+                # Restore base model grad settings for outer loop
+                for name, p in base_model.named_parameters():
+                    p.requires_grad_(base_grad_state[name])
+                # LoRA params should NOT receive gradients in outer loop
+                for p in lora_params:
+                    p.requires_grad_(False)
+
+                # Outer loop: forward on query half with adapted LoRA,
+                # backward to base model params (NOT to LoRA), normal optimizer step
+                with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=True):
+                    outer_loss = base_model(x_query, y_query)
+                train_loss += outer_loss.detach()
+                (outer_loss * grad_scale).backward()
+
+                # Remove LoRA after each meta-step
+                ephemeral_lora.remove_from_model()
+                del ephemeral_lora, lora_params
+
+            train_loss /= grad_accum_steps
+
+            # Manual gradient sync for distributed (since we bypassed DDP)
             if distributed:
-                model.require_backward_grad_sync = micro_step == grad_accum_steps - 1
-            x, y = train_loader.next_batch(args.train_batch_tokens, args.train_seq_len, grad_accum_steps)
-            with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=True):
-                loss = model(x, y)
-            train_loss += loss.detach()
-            (loss * grad_scale).backward()
-        train_loss /= grad_accum_steps
+                for p in base_model.parameters():
+                    if p.grad is not None:
+                        dist.all_reduce(p.grad, op=dist.ReduceOp.AVG)
+        else:
+            # --- NORMAL TRAINING STEP ---
+            for micro_step in range(grad_accum_steps):
+                if distributed:
+                    model.require_backward_grad_sync = micro_step == grad_accum_steps - 1
+                x, y = train_loader.next_batch(args.train_batch_tokens, args.train_seq_len, grad_accum_steps)
+                with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=True):
+                    loss = model(x, y)
+                train_loss += loss.detach()
+                (loss * grad_scale).backward()
+            train_loss /= grad_accum_steps
 
         frac = min(step / args.muon_momentum_warmup_steps, 1.0) if args.muon_momentum_warmup_steps > 0 else 1.0
         muon_momentum = (1 - frac) * args.muon_momentum_warmup_start + frac * args.muon_momentum
@@ -1117,6 +1433,47 @@ def main() -> None:
         f"eval_time:{1000.0 * (time.perf_counter() - t_qeval):.0f}ms"
     )
     log0(f"final_int8_zlib_roundtrip_exact val_loss:{q_val_loss:.8f} val_bpb:{q_val_bpb:.8f}")
+
+    # -----------------------------
+    # TTT EVAL (optional, legal LoRA test-time training)
+    # -----------------------------
+    if ttt_enabled:
+        log0("ttt_eval:starting")
+        torch.cuda.synchronize()
+        t_ttt = time.perf_counter()
+        ttt_val_loss, ttt_val_bpb = eval_val_sliding_ttt(
+            args=args,
+            base_model=base_model,
+            compiled_model=compiled_model,
+            model=model,
+            rank=rank,
+            world_size=world_size,
+            device=device,
+            grad_accum_steps=grad_accum_steps,
+            val_tokens=val_tokens,
+            base_bytes_lut=base_bytes_lut,
+            has_leading_space_lut=has_leading_space_lut,
+            is_boundary_token_lut=is_boundary_token_lut,
+            ttt_lr=ttt_lr,
+            ttt_epochs=ttt_epochs,
+            ttt_chunk_tokens=ttt_chunk_tokens,
+            ttt_freeze_blocks=ttt_freeze_blocks,
+            ttt_momentum=ttt_momentum,
+            ttt_grad_clip=ttt_grad_clip,
+            lora_rank=meta_lora_rank,
+        )
+        torch.cuda.synchronize()
+        ttt_elapsed = 1000.0 * (time.perf_counter() - t_ttt)
+        log0(
+            f"ttt_eval val_loss:{ttt_val_loss:.4f} val_bpb:{ttt_val_bpb:.4f} "
+            f"eval_time:{ttt_elapsed:.0f}ms"
+        )
+        log0(f"ttt_eval_exact val_loss:{ttt_val_loss:.8f} val_bpb:{ttt_val_bpb:.8f}")
+        log0(
+            f"ttt_config lr:{ttt_lr} epochs:{ttt_epochs} chunk_tokens:{ttt_chunk_tokens} "
+            f"freeze_blocks:{ttt_freeze_blocks} momentum:{ttt_momentum} "
+            f"grad_clip:{ttt_grad_clip} lora_rank:{meta_lora_rank}"
+        )
 
     if distributed:
         dist.destroy_process_group()
