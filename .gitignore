@@ -1,11 +1,34 @@
 data/tokenizers
-__pycache__/
-.DS_Store
-modded-nanogpt/
-modded-nanogpt
 data/datasets
 data/manifest.json
 data/docs_selected.jsonl
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
 .mypy_cache/
-.venv
+.venv/
 logs/
+modded-nanogpt/
+modded-nanogpt
+
+# Training artifacts
+final_model.pt
+final_model.int8.ptz
+final_model.int6.ptz
+*.ptz
+*.pt
+run.log
+
+# OS artifacts
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+
+# Records data (large log files)
+records/track_10min_16mb/*/train_seed*.log
+records/track_10min_16mb/*/train.log
+records/track_non_record_16mb/*/train*.log
