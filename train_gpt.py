@@ -905,12 +905,14 @@ def eval_val_adaptive_stride(
 
     # --- Phase 2: Classify positions by NLL ---
     all_positions = sorted(pos_nll.keys())
-    all_nlls = torch.tensor([pos_nll[p] for p in all_positions])
+    all_nlls = torch.tensor([pos_nll[p] for p in all_positions], dtype=torch.float32)
     if len(all_nlls) == 0:
         base_model.train()
         return 0.0, 0.0
-    threshold_hard = torch.quantile(all_nlls, 1.0 - hard_fraction).item()
-    threshold_easy = torch.quantile(all_nlls, easy_fraction).item()
+    # Use numpy for quantile (torch.quantile has size limits)
+    all_nlls_np = all_nlls.numpy()
+    threshold_hard = float(np.percentile(all_nlls_np, 100.0 * (1.0 - hard_fraction)))
+    threshold_easy = float(np.percentile(all_nlls_np, 100.0 * easy_fraction))
 
     hard_positions = set(p for p in all_positions if pos_nll[p] >= threshold_hard)
     easy_positions = set(p for p in all_positions if pos_nll[p] <= threshold_easy)
