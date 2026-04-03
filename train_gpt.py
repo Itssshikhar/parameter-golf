@@ -996,9 +996,14 @@ class GPT(nn.Module):
         return ve_base * self.ve_layer_scales[ve_idx].to(dtype=ve_base.dtype)
     def set_bpb_luts(self, base_bytes: Tensor, has_leading_space: Tensor, is_boundary: Tensor) -> None:
         """Store BPB lookup tables as non-parameter buffers for BPB-weighted loss."""
-        self.register_buffer('_bpb_base_bytes', base_bytes, persistent=False)
-        self.register_buffer('_bpb_has_leading_space', has_leading_space, persistent=False)
-        self.register_buffer('_bpb_is_boundary', is_boundary, persistent=False)
+        if hasattr(self, '_bpb_base_bytes'):
+            self._bpb_base_bytes = base_bytes
+            self._bpb_has_leading_space = has_leading_space
+            self._bpb_is_boundary = is_boundary
+        else:
+            self.register_buffer('_bpb_base_bytes', base_bytes, persistent=False)
+            self.register_buffer('_bpb_has_leading_space', has_leading_space, persistent=False)
+            self.register_buffer('_bpb_is_boundary', is_boundary, persistent=False)
     def _compute_bpb_weights(self, input_ids: Tensor, target_ids: Tensor) -> Tensor:
         """Compute per-token BPB weights: 1/bytes(token), normalized to mean 1.0.
         Tokens with more bytes get lower weight, tokens with fewer bytes get higher weight.
