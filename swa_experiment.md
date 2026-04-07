@@ -697,6 +697,61 @@ Their key innovation — mixed seq_len training — solves the "can't eval at di
 
 The simpler approach (no mixed training): download the raw `.pt` model, generate AR calibration at seq2048, run GPTQ with 2048-calibrated Hessians, eval at 2048. This tests whether the GPTQ calibration mismatch was the only reason eval@2048 broke.
 
+## 3-Seed Reproduction (2026-04-07) — 1.1130 claim does NOT hold
+
+### Background
+
+The seq4096 v2 single-seed Modal run claimed **1.1130 sliding BPB**, beating #1's 1.1147 by 0.0017. A 3-seed local reproduction was run to validate this claim.
+
+### Setup
+
+- **Hardware:** 8xH100 SXM (local, same machine for all seeds)
+- **Config:** Identical to seq4096 v2 (TRAIN_SEQ_LEN=4096, SWA_WINDOW_SIZE=256, SWA_FULL_ATTN_LAYERS=5, BIGRAM_VOCAB_SIZE=3072, BIGRAM_DIM=112, WARMDOWN_ITERS=4000)
+- **Seeds:** 1337, 42, 7
+- **Wallclock:** 600s (default 10-minute cap)
+- **Script:** `run_3seed_local.sh`
+
+### Results
+
+| Seed | Steps | step_avg | Post-EMA bpb | Roundtrip bpb | Sliding bpb |
+|------|-------|----------|-------------|--------------|-------------|
+| 1337 | 6735 | 89.10ms | 1.1252 | 1.1303 | **1.1165** |
+| 42 | 6726 | 89.22ms | 1.1253 | 1.1305 | **1.1166** |
+| 7 | 6724 | 89.25ms | 1.1247 | 1.1300 | **1.1163** |
+| **Mean** | **6728** | **89.19ms** | **1.1251** | **1.1303** | **1.1165** |
+
+### Comparison to original claim
+
+| Metric | Original (Modal, 1 seed) | 3-Seed Mean (local) | Delta |
+|--------|--------------------------|---------------------|-------|
+| step_avg | 82.14ms | 89.19ms | **+7.05ms (+8.6%)** |
+| Steps | 7305 | 6728 | **-577 (-7.9%)** |
+| Pre-quant bpb | 1.1216 | 1.1251 | +0.0035 |
+| Sliding bpb | **1.1130** | **1.1165** | **+0.0035** |
+| vs #1 (1.1147) | -0.0017 (beats) | **+0.0018 (does NOT beat)** | — |
+
+### Why the discrepancy
+
+1. **Slower step time locally (89ms vs 82ms).** The Modal H100s ran 8.6% faster per step. This gave 577 more training steps on Modal — 8.6% more training in the same 600s wallclock. The exact cause is unclear (different H100 SKU, interconnect, CUDA driver, or system overhead), but the effect is real and consistent across all 3 local seeds.
+
+2. **Single-seed noise.** The original 1.1130 was from one seed. Even locally, the 3 seeds are very consistent (spread of 0.0003), so seed variance isn't the primary factor — the step count gap is.
+
+3. **GPTQ stochasticity.** The autoregressive calibration data is generated with temp=0.8, introducing some variance. A previous local seed-1337 run got 1.1155 vs this run's 1.1165 (delta 0.001), confirming GPTQ adds ~0.001 noise on top of training variance.
+
+### Honest assessment
+
+- **The 1.1130 claim is not reproducible** on our local 8xH100 hardware. The 3-seed mean of 1.1165 is the honest number for this config.
+- **This config does NOT beat #1 (1.1147)** — it's 0.0018 worse on a 3-seed mean.
+- The pre-quant quality IS better (1.1251 vs #1's 1.1354), but the larger quantization gap (0.0052 vs 0.0041) and fewer training steps eat the advantage.
+- The "Expected" note in the How to Run section (below) has been corrected to reflect actual local performance.
+
+### Models uploaded
+
+All 3 quantized models uploaded to `shikhar007/parameter-golf-gram-ns`:
+- `models/3seed_s1337.int6.ptz`
+- `models/3seed_s42.int6.ptz`
+- `models/3seed_s7.int6.ptz`
+
 ## How to run
 
 ### Prerequisites
@@ -724,7 +779,8 @@ SEED=1337 \
 torchrun --standalone --nproc_per_node=8 train_gpt_swa.py
 ```
 
-Expected: ~82ms/step, ~7300 steps, pre-quant ~1.122, sliding eval ~1.113.
+Expected (Modal): ~82ms/step, ~7300 steps, sliding eval ~1.113 (single seed).
+Expected (local 8xH100): ~89ms/step, ~6725 steps, sliding eval ~1.116 (3-seed mean 1.1165).
 
 ### Best config via Modal
 
