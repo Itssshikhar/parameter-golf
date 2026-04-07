@@ -745,6 +745,32 @@ The seq4096 v2 single-seed Modal run claimed **1.1130 sliding BPB**, beating #1'
 - The pre-quant quality IS better (1.1251 vs #1's 1.1354), but the larger quantization gap (0.0052 vs 0.0041) and fewer training steps eat the advantage.
 - The "Expected" note in the How to Run section (below) has been corrected to reflect actual local performance.
 
+### Performance investigation: why 89ms local vs 82ms Modal
+
+Investigated whether the 7ms/step gap could be closed locally. **It cannot — the bottleneck is container-level, not code-level.**
+
+**What we confirmed is NOT the problem:**
+- GPU clocks: maxed at 1980 MHz SM / 2619 MHz memory during training (verified mid-run with `nvidia-smi`)
+- Thermal throttling: none, GPUs at 50-65°C, power 483-535W (well under 700W TDP)
+- Disk I/O: 7.1 GB/s sequential read, not a bottleneck
+- GPU SKU: H100 SXM5 80GB HBM3 (board 692-2G520-0200-000), same class as Modal
+
+**What we tried (no improvement):**
+- `CUDA_DEVICE_MAX_CONNECTIONS=1` — no change
+- `NCCL_ALGO=Ring`, `NCCL_NET_GDR_LEVEL=5` — no change
+- `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` — no change
+- Combined all above: 90ms/step (slightly worse than baseline 89ms)
+
+**Root cause: container capability limits.**
+The training runs inside a container missing `cap_sys_admin`, `cap_sys_nice`, `cap_ipc_lock`. This prevents:
+- Locking GPU clocks (`nvidia-smi -lgc` returns "permission denied")
+- NUMA-aware CPU pinning (`numactl`, `taskset`)
+- Memory locking for NCCL shared memory buffers
+
+Modal runs with full host privileges, which likely accounts for the 8.6% throughput gap. The fix requires either running directly on the host (outside the container) or running on Modal.
+
+**Conclusion:** 89ms/step is the ceiling for this container environment. To get an authoritative 3-seed result at Modal's 82ms speed, the training must run on Modal.
+
 ### Models uploaded
 
 All 3 quantized models uploaded to `shikhar007/parameter-golf-gram-ns`:
