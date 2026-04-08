@@ -100,11 +100,14 @@ def train():
 
     env = {
         **os.environ,
-        "RUN_ID": "seq4096_swa256_full5_v2",
+        "RUN_ID": "seq4096_qk25_sigmoid_pko",
         "TRAIN_SEQ_LEN": "4096",
         "EVAL_SEQ_LEN": "4096",
         "SWA_WINDOW_SIZE": "256",
         "SWA_FULL_ATTN_LAYERS": "5",
+        # QK_GAIN_INIT defaults to 2.5 in code (changed from 1.5 based on convergence data)
+        "LOGIT_RESCALE": "sigmoid",     # 23*sigmoid((x+5)/7.5) from NanoGPT speedrun
+        "PARTIAL_KEY_OFFSET": "1",      # shift K stationary dims by 1 for induction heads
         "BIGRAM_VOCAB_SIZE": "3072",
         "BIGRAM_DIM": "112",
         "WARMDOWN_ITERS": "4000",

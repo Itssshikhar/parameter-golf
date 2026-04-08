@@ -48,7 +48,7 @@ class Hyperparameters:
     train_seq_len = int(os.environ.get("TRAIN_SEQ_LEN", 2048))
     eval_seq_len = int(os.environ.get("EVAL_SEQ_LEN", 2048))
     max_wallclock_seconds = float(os.environ.get("MAX_WALLCLOCK_SECONDS", 600.0))
-    qk_gain_init = float(os.environ.get("QK_GAIN_INIT", 1.5))
+    qk_gain_init = float(os.environ.get("QK_GAIN_INIT", 2.5))
     vocab_size = int(os.environ.get("VOCAB_SIZE", 1024))
     num_layers = int(os.environ.get("NUM_LAYERS", 11))
     num_kv_heads = int(os.environ.get("NUM_KV_HEADS", 4))
@@ -58,6 +58,7 @@ class Hyperparameters:
     tie_embeddings = bool(int(os.environ.get("TIE_EMBEDDINGS", "1")))
     rope_base = float(os.environ.get("ROPE_BASE", 10000.0))
     logit_softcap = float(os.environ.get("LOGIT_SOFTCAP", 30.0))
+    logit_rescale_mode = os.environ.get("LOGIT_RESCALE", "tanh")  # "tanh" or "sigmoid"
     embed_lr = float(os.environ.get("EMBED_LR", 0.6))
     head_lr = float(os.environ.get("HEAD_LR", 0.008))
     tied_embed_lr = float(os.environ.get("TIED_EMBED_LR", 0.035))
@@ -638,6 +639,7 @@ class CausalSelfAttention(nn.Module):
         self.rotary = Rotary(self.head_dim, base=rope_base, train_seq_len=1024)
         self.use_xsa = False  # set by GPT.__init__ for deep layers only
         self.window_size = (-1, -1)  # (-1,-1) = full attention; set by GPT.__init__ per layer
+        self.partial_key_offset = False  # set by GPT.__init__ for full-attention layers
         # Gated attention and value residual (non-banked small params)
         self.gated_attention = gated_attention
         if gated_attention:
@@ -674,6 +676,11 @@ class CausalSelfAttention(nn.Module):
         cos, sin = self.rotary(seqlen, x.device, q.dtype)
         q = apply_rotary_emb(q, cos, sin, self.rope_dims)
         k = apply_rotary_emb(k, cos, sin, self.rope_dims)
+        # Partial key offset: shift stationary dims of K forward by 1 position.
+        # Enables single-layer induction heads. From NanoGPT speedrun.
+        if self.partial_key_offset and seqlen > 1:
+            rd = self.rope_dims if self.rope_dims < self.head_dim else self.head_dim // 2
+            k[:, 1:, :, rd:] = k[:, :-1, :, rd:]
         q = q * self.q_gain.to(dtype=q.dtype)[None, None, :, None]
         y = flash_attn_3_func(q, k, v, causal=True, window_size=self.window_size)
         if self.use_xsa:
@@ -834,6 +841,7 @@ class GPT(nn.Module):
         self.tie_embeddings = tie_embeddings
         self.tied_embed_init_std = tied_embed_init_std
         self.logit_softcap = logit_softcap
+        self._logit_rescale_sigmoid = os.environ.get("LOGIT_RESCALE", "tanh") == "sigmoid"
         self.value_residual = value_residual
         self.mtp_num_heads = mtp_num_heads
         self.mtp_loss_weight = mtp_loss_weight
@@ -911,6 +919,12 @@ class GPT(nn.Module):
                 self.blocks[i].attn.window_size = (swa_window_size, swa_window_size)
                 swa_layers.append(i)
         self._swa_layers = swa_layers
+        # Partial key offset: enable on full-attention layers (not SWA layers)
+        pko_enabled = bool(int(os.environ.get("PARTIAL_KEY_OFFSET", "0")))
+        if pko_enabled:
+            for i in range(num_layers):
+                if self.blocks[i].attn.window_size == (-1, -1):
+                    self.blocks[i].attn.partial_key_offset = True
         # Backout: freeze attention input for last N layers
         backout_layers = int(os.environ.get("BACKOUT_LAYERS", "0"))
         self._backout_layers = backout_layers
@@ -998,7 +1012,7 @@ class GPT(nn.Module):
             if self.lm_head is None:
                 raise RuntimeError("lm_head is required when tie_embeddings=False")
             logits_proj = self.lm_head(x_flat)
-        logits = self.logit_softcap * torch.tanh(logits_proj / self.logit_softcap)
+        logits = 23.0 * torch.sigmoid((logits_proj + 5.0) / 7.5) if self._logit_rescale_sigmoid else self.logit_softcap * torch.tanh(logits_proj / self.logit_softcap)
         main_loss = F.cross_entropy(logits.float(), targets, reduction="mean")
         if self.training and self.mtp_num_heads > 0 and self.mtp_loss_weight > 0.0:
             _, seqlen, dim = x.shape
@@ -1059,7 +1073,8 @@ class GPT(nn.Module):
             logits_proj = F.linear(x, self.tok_emb.weight)
         else:
             logits_proj = self.lm_head(x)
-        return self.logit_softcap * torch.tanh(logits_proj / self.logit_softcap)
+        logits = 23.0 * torch.sigmoid((logits_proj + 5.0) / 7.5) if self._logit_rescale_sigmoid else self.logit_softcap * torch.tanh(logits_proj / self.logit_softcap)
+        return logits
 
 # --- Sliding window evaluation ---
 
@@ -1486,6 +1501,7 @@ class _HessianGPT(nn.Module):
         super().__init__()
         self.tie_embeddings = tie_embeddings
         self.logit_softcap = logit_softcap
+        self._logit_rescale_sigmoid = os.environ.get("LOGIT_RESCALE", "tanh") == "sigmoid"
         self.num_layers = num_layers
         self.tok_emb = nn.Embedding(vocab_size, model_dim)
         self.bigram = BigramHashEmbedding(bigram_vocab_size, bigram_dim, model_dim, trigram=bool(int(os.environ.get("TRIGRAM", "0")))) if bigram_vocab_size > 0 else None
@@ -1554,7 +1570,7 @@ class _HessianGPT(nn.Module):
         x_flat = x.reshape(-1, x.size(-1))
         targets = target_ids.reshape(-1)
         logits_proj = F.linear(x_flat, self.tok_emb.weight) if self.tie_embeddings else self.lm_head(x_flat)
-        logits = self.logit_softcap * torch.tanh(logits_proj / self.logit_softcap)
+        logits = 23.0 * torch.sigmoid((logits_proj + 5.0) / 7.5) if self._logit_rescale_sigmoid else self.logit_softcap * torch.tanh(logits_proj / self.logit_softcap)
         return F.cross_entropy(logits.float(), targets, reduction="mean")
 
 def collect_hessians(hessian_model, train_loader, args, device, grad_accum_steps, num_batches=256):
@@ -1933,7 +1949,7 @@ def main() -> None:
     from collections import deque
     lawa_queue: deque[dict[str, Tensor]] = deque(maxlen=args.lawa_k)
     ema_state = {name: t.detach().float().clone() for name, t in base_model.state_dict().items()}
-    ema_decay = 0.997
+    ema_decay = float(os.environ.get("EMA_DECAY", "0.997"))
     training_time_ms = 0.0
     stop_after_step: int | None = None
     current_batch_tokens = _current_batch_tokens

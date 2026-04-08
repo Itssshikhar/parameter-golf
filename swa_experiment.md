@@ -889,3 +889,83 @@ All models are saved to `shikhar007/parameter-golf-gram-ns` with RUN_ID in the f
 | `MUON_WD` | 0.04 | 0.04 | 0.04 |
 | `LATE_QAT_THRESHOLD` | 0.15 | 0.15 | 0.15 |
 | `EVAL_STRIDE` | 64 | 64 | 64 |
+
+## NanoGPT speedrun techniques: stacked experiment
+
+### What was tried
+
+Three techniques from the NanoGPT speedrun SOTA, all verified against the actual source code in `KellerJordan/modded-nanogpt/train_gpt.py`:
+
+**1. QK gain init 2.5 (was 1.5)**
+
+Inspected the trained seq4096 model weights on HuggingFace. The learned `q_gain` values across all 11 layers × 8 heads:
+- Most heads converged to 2.0-2.8 (average ~2.3)
+- Layer 8 extreme: two heads at 4.2 and 5.4
+- A few stayed low: 1.0-1.2
+
+Starting at 2.5 instead of 1.5 saves ~100-200 optimization steps that the model spent adjusting gain from 1.5 → 2.3.
+
+**2. Asymmetric logit rescale (sigmoid)**
+
+Replaced `30 * tanh(logits / 30)` with `23 * sigmoid((logits + 5) / 7.5)`.
+
+The NanoGPT speedrun evolved this through several iterations:
+- Original: `30 * tanh(x/30)` (Gemma 2 style)
+- @KoszarskyB reduced to 15
+- @YouJiacheng shifted to `2*sigmoid(2*x) = tanh(x)+1`
+- @classiclarryd settled on `23*sigmoid((x+5)/7.5)`
+
+The sigmoid version is asymmetric — positive logits are amplified more than negative ones. This changes the gradient dynamics at the output layer. In NanoGPT it gave -40 steps / -2.9 seconds.
+
+Verified from actual code: `logits = 23 * torch.sigmoid((logits + 5) / 7.5)` at line 1354 of their train_gpt.py.
+
+**3. Partial key offset**
+
+On full-attention layers, shift the stationary (non-RoPE) dimensions of K forward by 1 position:
+```python
+k[:, 1:, :, rope_dims:] = k[:, :-1, :, rope_dims:]
+```
+
+This enables **single-layer induction heads**: when the model sees a pattern "...X Y ... X" at position t, the key at position t has the stationary features of position t-1 (which is X). A query looking for "what follows X" can match directly in one layer.
+
+At seq4096 with partial RoPE (16/64 dims), the stationary dims are 48 out of 64 — 75% of the head dimension participates in induction matching.
+
+Verified from actual code: `k[:, 1:, :, self.head_dim // 2:] = k[:, :-1, :, self.head_dim // 2:]` at line 1098. NanoGPT uses head_dim//2 as the split (their RoPE covers first half). We use `rope_dims` (16) as the split since our partial RoPE only covers 16 dims.
+
+Only enabled on full-attention layers (not SWA layers) because induction requires attending to distant tokens.
+
+### Results (single seed 1337)
+
+**Config:** seq4096 + SWA w=256 + 5 full layers + QK gain 2.5 + sigmoid rescale + partial key offset.
+
+| Metric | With NanoGPT techniques | Baseline seq4096 (local 3-seed mean) | Current #1 |
+|---|---|---|---|
+| step_avg | 90.76ms | 89.19ms | 86.6ms |
+| Steps | 6613 | 6728 | 6927 |
+| Pre-quant | **1.1237** | 1.1259 | 1.1354 |
+| Quant gap | 0.0053 | 0.0046 | 0.0041 |
+| Roundtrip | **1.1290** | 1.1305 | 1.1395 |
+| **Sliding eval** | **1.1153** | **1.1165** | **1.1147** |
+| Gap from #1 | +0.0006 | +0.0018 | — |
+
+### Analysis
+
+**Pre-quant improved by 0.0022** (1.1237 vs 1.1259) despite 115 fewer steps (6613 vs 6728). This means the per-step quality genuinely improved — the three techniques are helping the model learn more efficiently. This is a real signal, not step-count noise.
+
+**Sliding eval improved by 0.0012** (1.1153 vs 1.1165). Part of the pre-quant gain was eaten by a slightly larger quant gap (0.0053 vs 0.0046). The sigmoid rescale may be changing weight distributions in a way that makes int6 quantization slightly harder.
+
+**Still 0.0006 from #1.** Single seed — the 3-seed mean could be better or worse. The improvement is directionally correct but we can't confirm statistical significance from one run.
+
+The **quant gap widening** (0.0053 vs 0.0046) is concerning. If we could keep the pre-quant gain and maintain the baseline quant gap of 0.0046, the sliding eval would be: 1.1237 + 0.0046 - sliding_benefit ≈ 1.1145. That would beat #1.
+
+Model uploaded to HuggingFace: `models/seq4096_qk25_sigmoid_pko.pt`
+
+### Remaining gap analysis
+
+To beat #1 by the required 0.005 nats (~0.003 BPB), we need sliding eval ≤ 1.1117.
+
+Current best single-seed: 1.1153. Need 0.0036 more improvement. Sources:
+1. **Fix quant gap** (0.0053 → 0.004): +0.0013 improvement. The sigmoid rescale might be causing this — could try keeping sigmoid in training but switching to tanh for the final model before quantization.
+2. **More Tier 2 techniques**: sparse attention gate (+0.0003-0.0005), VE+skip gates (+0.0003-0.0005)
+3. **3-seed on Modal at 82ms**: the faster hardware gives ~700 more steps, worth ~0.001-0.002 improvement
+4. **Tier 3 techniques**: BOS-aligned batches, alternating window layers

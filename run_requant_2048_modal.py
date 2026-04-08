@@ -130,15 +130,10 @@ val_tokens_4096 = tgs.load_validation_tokens(args.val_files, 4096)
 base_bytes_lut, has_leading_space_lut, is_boundary_token_lut = tgs.build_sentencepiece_luts(sp, args.vocab_size, device)
 
 # Download raw pre-quant model (trained at seq4096)
-log0("Downloading raw model...")
+log0("Downloading seq4096-trained model...")
 from huggingface_hub import hf_hub_download
-pt_path = hf_hub_download("shikhar007/parameter-golf-gram-ns", "exp2_w256_full5_seed1337.pt")
-log0(f"Downloaded: {pt_path}")
-
-# Wait — this is the Exp 2 model (trained at seq2048), not the seq4096 model.
-# The seq4096 model was uploaded as final_model.pt. Let me use that.
-pt_path_4096 = hf_hub_download("shikhar007/parameter-golf-gram-ns", "final_model.pt")
-log0(f"Downloaded seq4096 model: {pt_path_4096}")
+pt_path_4096 = hf_hub_download("shikhar007/parameter-golf-gram-ns", "models/seq4096_swa256_full5_v2.pt")
+log0(f"Downloaded: {pt_path_4096}")
 
 model_kwargs = dict(
     vocab_size=args.vocab_size, num_layers=args.num_layers, model_dim=args.model_dim,
