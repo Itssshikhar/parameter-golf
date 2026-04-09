@@ -1060,3 +1060,92 @@ Gap remaining: **0.0020 BPB**. No 3-seed run would change this — the improveme
 **Eval changes:**
 - TTT: neutral ✓
 - Sliding eval at different seq_len: model incompatible ✓
+- N-gram hedge mixer: neural model too strong, hedge gives 100% weight to neural ✓
+
+## Run 12: Bank QAT (proper QAT on all weights)
+
+**Date:** 2026-04-09
+**RUN_ID:** `seq4096_bankqat`
+**Modal account:** itssshikhar
+**Config:** seq4096 + SWA w=256 + 5 full + QK 2.5 + PKO + bank QAT
+
+### Motivation
+
+The late QAT in the code only applies fake int6 quantization to `CastedLinear` layers (~100K params), NOT the main bank parameters (~26M params) which use raw `F.linear()`. This means 99.6% of the quantized weights never experience quantization noise during training. Fix: add `_fake_quantize_int6()` STE to all 6 bank weight `F.linear()` calls (q_w, k_w, v_w, out_w, up_w, down_w) in `CausalSelfAttention.forward()` and `MLP.forward()`.
+
+### Implementation
+
+Added `_fake_quantize_int6(w)` helper (line 568-576 in train_gpt_swa.py):
+- Per-row scale, clip to [-31, 31] (matches post-training `quantize_int6_per_row`)
+- STE: `w + (w_q - w).detach()` — forward uses quantized, backward uses original
+- Applied in `CausalSelfAttention.forward()` (4 weights) and `MLP.forward()` (2 weights)
+- Uses existing `CastedLinear._qat_enabled` flag — kicks in at LR scale < 0.15
+
+### Results
+
+| Metric | Value |
+|---|---|
+| Pre-quant (pre-EMA) | 1.1210 |
+| Pre-quant (post-EMA) | **1.1200** |
+| Post-quant roundtrip | 1.1251 |
+| Quant gap | 0.0051 |
+| **Sliding eval** | **1.1112** |
+| vs #1 (1.1147) | **-0.0035** |
+| Submission threshold (1.1117) | **-0.0005 (BELOW!)** |
+
+Training: 7236 steps, 82.93ms/step, 600s wallclock. QAT enabled at step 6676 (scale=0.1499), ran for ~560 steps.
+
+Artifact: 16,261,110 bytes (16.26MB, fits 16MB limit). Uploaded to `shikhar007/parameter-golf-gram-ns/models/seq4096_bankqat.pt` and `.int6.ptz`.
+
+### Analysis
+
+The quant gap (0.0051) is the same as the QK2.5+PKO run without bank QAT. The bank QAT only ran for ~560 steps — likely too few to make a meaningful difference. However, the overall pre-quant quality (1.1200 post-EMA) was the best yet, giving a strong final sliding eval.
+
+This is the first single-seed result **below the submission threshold** (1.1117). However, submission requires 3+ seeds with p<0.01 and mean ≤ 1.1117.
+
+### Updated quantization wall table
+
+| Config | Pre-quant | Quant gap | Sliding eval |
+|---|---|---|---|
+| Baseline seq4096 (3-seed local) | 1.1259 | 0.0046 | 1.1165 |
+| + QK2.5 + PKO | 1.1226 | 0.0051 | 1.1139 |
+| + QK2.5 + sigmoid + PKO | 1.1237 | 0.0053 | 1.1153 |
+| + QK2.5 + PKO + SAG | 1.1209 | 0.0067 | 1.1137 |
+| **+ QK2.5 + PKO + bank QAT** | **1.1200** | **0.0051** | **1.1112** |
+
+Bank QAT achieved the best pre-quant (1.1200) without widening the quant gap compared to QK2.5+PKO. Removing SAG (which widened the gap by +0.0016) while getting even better pre-quant quality was the key.
+
+### Updated techniques summary
+
+**Quantization changes (additions):**
+- Bank QAT (fake int6 on all F.linear bank weights): no quant gap improvement yet (only 560 steps), needs longer QAT window ✓
+
+### 3-seed reproduction (2026-04-09)
+
+**Modal account:** itssshikhar, sequential runs (one 8xH100 at a time)
+
+| Seed | Pre-quant (EMA) | Roundtrip | Quant gap | Sliding eval |
+|---|---|---|---|---|
+| 1337 | 1.1201 | 1.1252 | 0.0051 | **1.1113** |
+| 42 | 1.1198 | 1.1250 | 0.0052 | **1.1112** |
+| 7 | 1.1213 | 1.1263 | 0.0050 | **1.1126** |
+| **Mean** | **1.1204** | **1.1255** | **0.0051** | **1.1117** |
+| Std | 0.0008 | 0.0007 | 0.0001 | 0.0008 |
+
+**3-seed mean: 1.1117 BPB** — exactly at the submission threshold (1.1147 - 0.003 = 1.1117).
+
+Models uploaded to `shikhar007/parameter-golf-gram-ns/models/seq4096_bankqat_s{1337,42,7}.{pt,int6.ptz}`.
+Logs: `swa_run_s{1337,42,7}.log`
+
+#### Submission viability analysis
+
+The submission requirement is: beat SOTA by 0.005 nats (~0.003 BPB) with p<0.01 on 3+ seeds.
+- Mean improvement over #1: 1.1147 - 1.1117 = **0.0030 BPB** (exactly 0.003)
+- This is right at the borderline. Whether it passes depends on the exact threshold interpretation (strict < vs ≤).
+- Seed 7 at 1.1126 is the weakest — pulled the mean up by ~0.001 vs the other two seeds.
+
+### Next steps
+
+1. **Earlier QAT threshold** — current 0.15 leaves only ~560 steps of QAT. Try 0.3 or 0.5 to give bank weights more QAT training time and potentially reduce the quant gap
+2. **Full QAT from start** — enable QAT from step 0, not just late training
+3. **Investigate seed 7 variance** — why is seed 7 consistently worse? Could be data shuffling interaction

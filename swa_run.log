@@ -1,0 +1,2214 @@
+=== BASELINE LOG ===
+(skipped — see previous run)
+=== SWA LOG ===
+logs/seq4096_bankqat.txt
+val_bpb:enabled tokenizer_kind=sentencepiece tokenizer_path=./data/tokenizers/fineweb_1024_bpe.model
+train_loader:dataset:fineweb10B_sp1024 train_shards:80
+val_loader:shards pattern=./data/datasets/fineweb10B_sp1024/fineweb_val_*.bin tokens:62021632
+model_params:27067484
+mtp_num_heads:0 mtp_loss_weight:0.2 mtp_params:0
+XSA:last_11 active_layers:[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+sliding_window_attn:layers=[0, 1, 2, 3, 4, 5] window_size=256 full_attn_layers=5
+world_size:8 grad_accum_steps:1
+sdp_backends:cudnn=False flash=True mem_efficient=False math=False
+attention_mode:gqa num_heads:8 num_kv_heads:4
+tie_embeddings:True embed_lr:0.035 head_lr:0.0 matrix_lr:0.025 scalar_lr:0.025
+train_batch_tokens:786432 train_seq_len:4096 iterations:20000 warmup_steps:20 max_wallclock_seconds:600.000
+seed:1337
+warmup_step:1/20
+warmup_step:2/20
+warmup_step:3/20
+warmup_step:4/20
+warmup_step:5/20
+warmup_step:6/20
+warmup_step:7/20
+warmup_step:8/20
+warmup_step:9/20
+warmup_step:10/20
+warmup_step:11/20
+warmup_step:12/20
+warmup_step:13/20
+warmup_step:14/20
+warmup_step:15/20
+warmup_step:16/20
+warmup_step:17/20
+warmup_step:18/20
+warmup_step:19/20
+warmup_step:20/20
+step:0/20000 val_loss:6.9301 val_bpb:4.1044 train_time:0ms step_avg:0.01ms
+step:1/20000 train_loss:6.9307 train_time:226ms step_avg:225.51ms
+step:2/20000 train_loss:8.6139 train_time:257ms step_avg:128.75ms
+step:3/20000 train_loss:7.7277 train_time:338ms step_avg:112.54ms
+step:4/20000 train_loss:7.0500 train_time:418ms step_avg:104.55ms
+step:5/20000 train_loss:7.1493 train_time:497ms step_avg:99.38ms
+step:6/20000 train_loss:7.2483 train_time:578ms step_avg:96.33ms
+step:7/20000 train_loss:7.1821 train_time:656ms step_avg:93.65ms
+step:8/20000 train_loss:7.0085 train_time:732ms step_avg:91.50ms
+step:9/20000 train_loss:6.5734 train_time:810ms step_avg:89.97ms
+step:10/20000 train_loss:6.1548 train_time:890ms step_avg:89.01ms
+step:500/20000 train_loss:2.3381 train_time:40619ms step_avg:81.24ms
+step:1000/20000 train_loss:2.2207 train_time:81489ms step_avg:81.49ms
+step:1500/20000 train_loss:2.1769 train_time:122638ms step_avg:81.76ms
+step:2000/20000 train_loss:2.0188 train_time:163812ms step_avg:81.91ms
+step:2500/20000 train_loss:2.1202 train_time:205072ms step_avg:82.03ms
+step:3000/20000 train_loss:2.1181 train_time:246347ms step_avg:82.12ms
+step:3500/20000 train_loss:2.1325 train_time:287620ms step_avg:82.18ms
+step:4000/20000 train_loss:1.9204 train_time:328880ms step_avg:82.22ms
+step:4000/20000 val_loss:2.0134 val_bpb:1.1925 train_time:328929ms step_avg:82.23ms
+step:4500/20000 train_loss:2.0772 train_time:370150ms step_avg:82.26ms
+step:5000/20000 train_loss:2.0575 train_time:411400ms step_avg:82.28ms
+step:5500/20000 train_loss:1.9801 train_time:452620ms step_avg:82.29ms
+step:6000/20000 train_loss:1.9042 train_time:493848ms step_avg:82.31ms
+swa:start step:6500
+step:6500/20000 train_loss:2.0514 train_time:535085ms step_avg:82.32ms
+late_qat:enabled step:6676 scale:0.1499
+step:7000/20000 train_loss:1.7585 train_time:579976ms step_avg:82.85ms
+step:7236/20000 val_loss:1.8927 val_bpb:1.1210 train_time:600078ms step_avg:82.93ms
+stopping_early: wallclock_cap train_time:600078ms step:7236/20000
+peak memory allocated: 22846 MiB reserved: 23118 MiB
+ema:applying EMA weights
+DIAGNOSTIC post_ema val_loss:1.8911 val_bpb:1.1200 eval_time:2010ms
+Serialized model: 106289590 bytes
+Code size: 115082 bytes
+gptq:building non-banked model for Hessian collection...
+gptq:generating autoregressive calibration data (64 seqs x 2048 tokens, temp=0.8)...
+gptq:generated 64 sequences in 519.1s
+gptq:collecting hessians from autoregressive data...
+gptq:collected hessians for 68 layers (AR self-gen)
+prune: 23818668 candidates of 25952256 total weights, unpruned=15.51MB target=15.9MB
+prune: already fits, no pruning needed
+Serialized model int6+lzma: 16146028 bytes
+Total submission size int6+lzma: 16261110 bytes
+final_int6_roundtrip val_loss:1.8996 val_bpb:1.1251 eval_time:93841ms
+final_int6_roundtrip_exact val_loss:1.89964202 val_bpb:1.12507500
+final_int6_sliding_window val_loss:1.8763 val_bpb:1.1112 stride:64 eval_time:399309ms
+final_int6_sliding_window_exact val_loss:1.87627694 val_bpb:1.11124287
+final_int8_zlib_roundtrip_exact val_loss:1.87627694 val_bpb:1.11124287
+
+Processing Files (0 / 0)      : |          |  0.00B /  0.00B
+
+New Data Upload               : |          |  0.00B /  0.00B            [A
+
+
+  final_model.pt              :   1%|          |  555kB /  106MB            [A[A
+
+
+  final_model.pt              :   1%|          |  555kB /  106MB            [A[A
+Processing Files (0 / 1)      :   1%|          |  555kB /  106MB,  925kB/s
+
+New Data Upload               :   1%|          |  555kB /  106MB,  925kB/s  [A
+
+
+  final_model.pt              :   1%|          |  555kB /  106MB            [A[A
+
+
+  final_model.pt              :   1%|          |  555kB /  106MB            [A[A
+
+
+  final_model.pt              :   1%|          |  555kB /  106MB            [A[A
+
+
+  final_model.pt              :   1%|          |  555kB /  106MB            [A[A
+
+
+  final_model.pt              :   1%|          |  555kB /  106MB            [A[A
+
+
+  final_model.pt              :   1%|          |  555kB /  106MB            [A[A
+
+
+  final_model.pt              :   1%|          |  555kB /  106MB            [A[A
+
+
+  final_model.pt              :   1%|          |  555kB /  106MB            [A[A
+
+
+  final_model.pt              :   1%|          |  555kB /  106MB            [A[A
+
+
+  final_model.pt              :   1%|          |  555kB /  106MB            [A[A
+
+
+  final_model.pt              :   1%|          |  555kB /  106MB            [A[A
+
+
+  final_model.pt              :   1%|          |  555kB /  106MB            [A[A
+
+
+  final_model.pt              :   1%|          |  555kB /  106MB            [A[A
+
+
+  final_model.pt              :   1%|          |  555kB /  106MB            [A[A
+
+
+  final_model.pt              :   1%|          |  555kB /  106MB            [A[A
+
+
+  final_model.pt              :   1%|          |  555kB /  106MB            [A[A
+
+
+  final_model.pt              :   1%|          |  555kB /  106MB            [A[A
+
+
+  final_model.pt              :   1%|          |  555kB /  106MB            [A[A
+
+
+  final_model.pt              :   1%|          |  555kB /  106MB            [A[A
+
+
+  final_model.pt              :   1%|          |  555kB /  106MB            [A[A
+
+
+  final_model.pt              :   1%|          |  555kB /  106MB            [A[A
+
+
+  final_model.pt              :   1%|          |  555kB /  106MB            [A[A
+
+
+  final_model.pt              :   1%|          | 1.11MB /  106MB            [A[A
+Processing Files (0 / 1)      :   1%|          | 1.11MB /  106MB,  213kB/s
+
+New Data Upload               :   1%|          | 1.11MB /  106MB,  213kB/s  [A
+
+
+  final_model.pt              :   1%|          | 1.11MB /  106MB            [A[A
+
+
+  final_model.pt              :   1%|          | 1.11MB /  106MB            [A[A
+
+
+  final_model.pt              :   1%|          | 1.11MB /  106MB            [A[A
+
+
+  final_model.pt              :   1%|          | 1.11MB /  106MB            [A[A
+
+
+  final_model.pt              :   2%|▏         | 2.22MB /  106MB            [A[A
+Processing Files (0 / 1)      :   2%|▏         | 2.22MB /  106MB,  358kB/s
+
+New Data Upload               :   2%|▏         | 2.22MB /  106MB,  358kB/s  [A
+
+
+  final_model.pt              :   2%|▏         | 2.22MB /  106MB            [A[A
+
+
+  final_model.pt              :   2%|▏         | 2.22MB /  106MB            [A[A
+
+
+  final_model.pt              :   2%|▏         | 2.22MB /  106MB            [A[A
+
+
+  final_model.pt              :   2%|▏         | 2.22MB /  106MB            [A[A
+
+
+  final_model.pt              :   3%|▎         | 2.77MB /  106MB            [A[A
+Processing Files (0 / 1)      :   3%|▎         | 2.77MB /  106MB,  385kB/s
+
+New Data Upload               :   3%|▎         | 2.77MB /  106MB,  385kB/s  [A
+
+
+  final_model.pt              :   3%|▎         | 2.77MB /  106MB            [A[A
+
+
+  final_model.pt              :   3%|▎         | 2.77MB /  106MB            [A[A
+
+
+  final_model.pt              :   3%|▎         | 2.77MB /  106MB            [A[A
+
+
+  final_model.pt              :   3%|▎         | 3.33MB /  106MB            [A[A
+Processing Files (0 / 1)      :   3%|▎         | 3.33MB /  106MB,  416kB/s
+
+New Data Upload               :   3%|▎         | 3.33MB /  106MB,  416kB/s  [A
+
+
+  final_model.pt              :   3%|▎         | 3.33MB /  106MB            [A[A
+
+
+  final_model.pt              :   3%|▎         | 3.33MB /  106MB            [A[A
+
+
+  final_model.pt              :   3%|▎         | 3.33MB /  106MB            [A[A
+
+
+  final_model.pt              :   3%|▎         | 3.33MB /  106MB            [A[A
+
+
+  final_model.pt              :   4%|▎         | 3.88MB /  106MB            [A[A
+Processing Files (0 / 1)      :   4%|▎         | 3.88MB /  106MB,  431kB/s
+
+New Data Upload               :   4%|▎         | 3.88MB /  106MB,  431kB/s  [A
+
+
+  final_model.pt              :   4%|▎         | 3.88MB /  106MB            [A[A
+
+
+  final_model.pt              :   4%|▎         | 3.88MB /  106MB            [A[A
+
+
+  final_model.pt              :   4%|▎         | 3.88MB /  106MB            [A[A
+
+
+  final_model.pt              :   4%|▎         | 3.88MB /  106MB            [A[A
+
+
+  final_model.pt              :   4%|▎         | 3.88MB /  106MB            [A[A
+
+
+  final_model.pt              :   4%|▎         | 3.88MB /  106MB            [A[A
+
+
+  final_model.pt              :   4%|▍         | 4.44MB /  106MB            [A[A
+Processing Files (0 / 1)      :   4%|▍         | 4.44MB /  106MB,  435kB/s
+
+New Data Upload               :   4%|▍         | 4.44MB /  106MB,  435kB/s  [A
+
+
+  final_model.pt              :   4%|▍         | 4.44MB /  106MB            [A[A
+
+
+  final_model.pt              :   4%|▍         | 4.44MB /  106MB            [A[A
+
+
+  final_model.pt              :   4%|▍         | 4.44MB /  106MB            [A[A
+
+
+  final_model.pt              :   4%|▍         | 4.44MB /  106MB            [A[A
+
+
+  final_model.pt              :   5%|▍         | 4.99MB /  106MB            [A[A
+Processing Files (0 / 1)      :   5%|▍         | 4.99MB /  106MB,  435kB/s
+
+New Data Upload               :   5%|▍         | 4.99MB /  106MB,  435kB/s  [A
+
+
+  final_model.pt              :   5%|▍         | 4.99MB /  106MB            [A[A
+
+
+  final_model.pt              :   5%|▍         | 4.99MB /  106MB            [A[A
+
+
+  final_model.pt              :   5%|▍         | 4.99MB /  106MB            [A[A
+
+
+  final_model.pt              :   5%|▍         | 4.99MB /  106MB            [A[A
+
+
+  final_model.pt              :   5%|▌         | 5.55MB /  106MB            [A[A
+Processing Files (0 / 1)      :   5%|▌         | 5.55MB /  106MB,  489kB/s
+
+New Data Upload               :   5%|▌         | 5.55MB /  106MB,  489kB/s  [A
+
+
+  final_model.pt              :   5%|▌         | 5.55MB /  106MB            [A[A
+
+
+  final_model.pt              :   5%|▌         | 5.55MB /  106MB            [A[A
+
+
+  final_model.pt              :   5%|▌         | 5.55MB /  106MB            [A[A
+
+
+  final_model.pt              :   5%|▌         | 5.55MB /  106MB            [A[A
+
+
+  final_model.pt              :   6%|▌         | 6.10MB /  106MB            [A[A
+Processing Files (0 / 1)      :   6%|▌         | 6.10MB /  106MB,  544kB/s
+
+New Data Upload               :   6%|▌         | 6.10MB /  106MB,  544kB/s  [A
+
+
+  final_model.pt              :   6%|▌         | 6.10MB /  106MB            [A[A
+
+
+  final_model.pt              :   6%|▌         | 6.10MB /  106MB            [A[A
+
+
+  final_model.pt              :   6%|▌         | 6.10MB /  106MB            [A[A
+
+
+  final_model.pt              :   6%|▋         | 6.65MB /  106MB            [A[A
+Processing Files (0 / 1)      :   6%|▋         | 6.65MB /  106MB,  598kB/s
+
+New Data Upload               :   6%|▋         | 6.65MB /  106MB,  598kB/s  [A
+
+
+  final_model.pt              :   6%|▋         | 6.65MB /  106MB            [A[A
+
+
+  final_model.pt              :   6%|▋         | 6.65MB /  106MB            [A[A
+
+
+  final_model.pt              :   7%|▋         | 7.21MB /  106MB            [A[A
+Processing Files (0 / 1)      :   7%|▋         | 7.21MB /  106MB,  653kB/s
+
+New Data Upload               :   7%|▋         | 7.21MB /  106MB,  653kB/s  [A
+
+
+  final_model.pt              :   7%|▋         | 7.21MB /  106MB            [A[A
+
+
+  final_model.pt              :   7%|▋         | 7.21MB /  106MB            [A[A
+
+
+  final_model.pt              :   7%|▋         | 7.76MB /  106MB            [A[A
+Processing Files (0 / 1)      :   7%|▋         | 7.76MB /  106MB,  652kB/s
+
+New Data Upload               :   7%|▋         | 7.76MB /  106MB,  652kB/s  [A
+
+
+  final_model.pt              :   7%|▋         | 7.76MB /  106MB            [A[A
+
+
+  final_model.pt              :   7%|▋         | 7.76MB /  106MB            [A[A
+
+
+  final_model.pt              :   7%|▋         | 7.76MB /  106MB            [A[A
+
+
+  final_model.pt              :   8%|▊         | 8.32MB /  106MB            [A[A
+Processing Files (0 / 1)      :   8%|▊         | 8.32MB /  106MB,  707kB/s
+
+New Data Upload               :   8%|▊         | 8.32MB /  106MB,  707kB/s  [A
+
+
+  final_model.pt              :   8%|▊         | 8.32MB /  106MB            [A[A
+
+
+  final_model.pt              :   8%|▊         | 8.32MB /  106MB            [A[A
+
+
+  final_model.pt              :   8%|▊         | 8.87MB /  106MB            [A[A
+Processing Files (0 / 1)      :   8%|▊         | 8.87MB /  106MB,  652kB/s
+
+New Data Upload               :   8%|▊         | 8.87MB /  106MB,  652kB/s  [A
+
+
+  final_model.pt              :   8%|▊         | 8.87MB /  106MB            [A[A
+
+
+  final_model.pt              :   9%|▉         | 9.43MB /  106MB            [A[A
+Processing Files (0 / 1)      :   9%|▉         | 9.43MB /  106MB,  707kB/s
+
+New Data Upload               :   9%|▉         | 9.43MB /  106MB,  707kB/s  [A
+
+
+  final_model.pt              :   9%|▉         | 9.43MB /  106MB            [A[A
+
+
+  final_model.pt              :   9%|▉         | 9.43MB /  106MB            [A[A
+
+
+  final_model.pt              :   9%|▉         | 9.98MB /  106MB            [A[A
+Processing Files (0 / 1)      :   9%|▉         | 9.98MB /  106MB,  707kB/s
+
+New Data Upload               :   9%|▉         | 9.98MB /  106MB,  707kB/s  [A
+
+
+  final_model.pt              :   9%|▉         | 9.98MB /  106MB            [A[A
+
+
+  final_model.pt              :  10%|▉         | 10.5MB /  106MB            [A[A
+Processing Files (0 / 1)      :  10%|▉         | 10.5MB /  106MB,  707kB/s
+
+New Data Upload               :  10%|▉         | 10.5MB /  106MB,  707kB/s  [A
+
+
+  final_model.pt              :  10%|▉         | 10.5MB /  106MB            [A[A
+
+
+  final_model.pt              :  10%|▉         | 10.5MB /  106MB            [A[A
+
+
+  final_model.pt              :  10%|█         | 11.1MB /  106MB            [A[A
+Processing Files (0 / 1)      :  10%|█         | 11.1MB /  106MB,  761kB/s
+
+New Data Upload               :  10%|█         | 11.1MB /  106MB,  761kB/s  [A
+
+
+  final_model.pt              :  10%|█         | 11.1MB /  106MB            [A[A
+
+
+  final_model.pt              :  11%|█         | 11.6MB /  106MB            [A[A
+Processing Files (0 / 1)      :  11%|█         | 11.6MB /  106MB,  761kB/s
+
+New Data Upload               :  11%|█         | 11.6MB /  106MB,  761kB/s  [A
+
+
+  final_model.pt              :  11%|█         | 11.6MB /  106MB            [A[A
+
+
+  final_model.pt              :  11%|█▏        | 12.2MB /  106MB            [A[A
+Processing Files (0 / 1)      :  11%|█▏        | 12.2MB /  106MB,  815kB/s
+
+New Data Upload               :  11%|█▏        | 12.2MB /  106MB,  815kB/s  [A
+
+
+  final_model.pt              :  11%|█▏        | 12.2MB /  106MB            [A[A
+
+
+  final_model.pt              :  11%|█▏        | 12.2MB /  106MB            [A[A
+
+
+  final_model.pt              :  12%|█▏        | 12.8MB /  106MB            [A[A
+Processing Files (0 / 1)      :  12%|█▏        | 12.8MB /  106MB,  870kB/s
+
+New Data Upload               :  12%|█▏        | 12.8MB /  106MB,  870kB/s  [A
+
+
+  final_model.pt              :  12%|█▏        | 12.8MB /  106MB            [A[A
+
+
+  final_model.pt              :  13%|█▎        | 13.3MB /  106MB            [A[A
+Processing Files (0 / 1)      :  13%|█▎        | 13.3MB /  106MB,  870kB/s
+
+New Data Upload               :  13%|█▎        | 13.3MB /  106MB,  870kB/s  [A
+
+
+  final_model.pt              :  13%|█▎        | 13.3MB /  106MB            [A[A
+
+
+  final_model.pt              :  13%|█▎        | 13.9MB /  106MB            [A[A
+Processing Files (0 / 1)      :  13%|█▎        | 13.9MB /  106MB,  924kB/s
+
+New Data Upload               :  13%|█▎        | 13.9MB /  106MB,  924kB/s  [A
+
+
+  final_model.pt              :  13%|█▎        | 13.9MB /  106MB            [A[A
+
+
+  final_model.pt              :  14%|█▎        | 14.4MB /  106MB            [A[A
+Processing Files (0 / 1)      :  14%|█▎        | 14.4MB /  106MB,  979kB/s
+
+New Data Upload               :  14%|█▎        | 14.4MB /  106MB,  979kB/s  [A
+
+
+  final_model.pt              :  14%|█▎        | 14.4MB /  106MB            [A[A
+
+
+  final_model.pt              :  14%|█▍        | 15.0MB /  106MB            [A[A
+Processing Files (0 / 1)      :  14%|█▍        | 15.0MB /  106MB,  979kB/s
+
+New Data Upload               :  14%|█▍        | 15.0MB /  106MB,  979kB/s  [A
+
+
+  final_model.pt              :  14%|█▍        | 15.0MB /  106MB            [A[A
+
+
+  final_model.pt              :  15%|█▌        | 16.1MB /  106MB            [A[A
+Processing Files (0 / 1)      :  15%|█▌        | 16.1MB /  106MB, 1.09MB/s
+
+New Data Upload               :  15%|█▌        | 16.1MB /  106MB, 1.09MB/s  [A
+
+
+  final_model.pt              :  16%|█▌        | 16.6MB /  106MB            [A[A
+Processing Files (0 / 1)      :  16%|█▌        | 16.6MB /  106MB, 1.14MB/s
+
+New Data Upload               :  16%|█▌        | 16.6MB /  106MB, 1.14MB/s  [A
+
+
+  final_model.pt              :  16%|█▌        | 16.6MB /  106MB            [A[A
+
+
+  final_model.pt              :  16%|█▌        | 17.2MB /  106MB            [A[A
+Processing Files (0 / 1)      :  16%|█▌        | 17.2MB /  106MB, 1.14MB/s
+
+New Data Upload               :  16%|█▌        | 17.2MB /  106MB, 1.14MB/s  [A
+
+
+  final_model.pt              :  16%|█▌        | 17.2MB /  106MB            [A[A
+
+
+  final_model.pt              :  17%|█▋        | 17.7MB /  106MB            [A[A
+Processing Files (0 / 1)      :  17%|█▋        | 17.7MB /  106MB, 1.20MB/s
+
+New Data Upload               :  17%|█▋        | 17.7MB /  106MB, 1.20MB/s  [A
+
+
+  final_model.pt              :  17%|█▋        | 17.7MB /  106MB            [A[A
+
+
+  final_model.pt              :  17%|█▋        | 18.3MB /  106MB            [A[A
+Processing Files (0 / 1)      :  17%|█▋        | 18.3MB /  106MB, 1.20MB/s
+
+New Data Upload               :  17%|█▋        | 18.3MB /  106MB, 1.20MB/s  [A
+
+
+  final_model.pt              :  18%|█▊        | 18.9MB /  106MB            [A[A
+Processing Files (0 / 1)      :  18%|█▊        | 18.9MB /  106MB, 1.25MB/s
+
+New Data Upload               :  18%|█▊        | 18.9MB /  106MB, 1.25MB/s  [A
+
+
+  final_model.pt              :  18%|█▊        | 18.9MB /  106MB            [A[A
+
+
+  final_model.pt              :  18%|█▊        | 19.4MB /  106MB            [A[A
+Processing Files (0 / 1)      :  18%|█▊        | 19.4MB /  106MB, 1.30MB/s
+
+New Data Upload               :  18%|█▊        | 19.4MB /  106MB, 1.30MB/s  [A
+
+
+  final_model.pt              :  18%|█▊        | 19.4MB /  106MB            [A[A
+
+
+  final_model.pt              :  19%|█▉        | 20.0MB /  106MB            [A[A
+Processing Files (0 / 1)      :  19%|█▉        | 20.0MB /  106MB, 1.30MB/s
+
+New Data Upload               :  19%|█▉        | 20.0MB /  106MB, 1.30MB/s  [A
+
+
+  final_model.pt              :  19%|█▉        | 20.5MB /  106MB            [A[A
+Processing Files (0 / 1)      :  19%|█▉        | 20.5MB /  106MB, 1.36MB/s
+
+New Data Upload               :  19%|█▉        | 20.5MB /  106MB, 1.36MB/s  [A
+
+
+  final_model.pt              :  19%|█▉        | 20.5MB /  106MB            [A[A
+
+
+  final_model.pt              :  20%|█▉        | 21.1MB /  106MB            [A[A
+Processing Files (0 / 1)      :  20%|█▉        | 21.1MB /  106MB, 1.36MB/s
+
+New Data Upload               :  20%|█▉        | 21.1MB /  106MB, 1.36MB/s  [A
+
+
+  final_model.pt              :  20%|██        | 21.6MB /  106MB            [A[A
+Processing Files (0 / 1)      :  20%|██        | 21.6MB /  106MB, 1.41MB/s
+
+New Data Upload               :  20%|██        | 21.6MB /  106MB, 1.41MB/s  [A
+
+
+  final_model.pt              :  20%|██        | 21.6MB /  106MB            [A[A
+
+
+  final_model.pt              :  21%|██        | 22.2MB /  106MB            [A[A
+Processing Files (0 / 1)      :  21%|██        | 22.2MB /  106MB, 1.41MB/s
+
+New Data Upload               :  21%|██        | 22.2MB /  106MB, 1.41MB/s  [A
+
+
+  final_model.pt              :  21%|██        | 22.2MB /  106MB            [A[A
+
+
+  final_model.pt              :  21%|██▏       | 22.7MB /  106MB            [A[A
+Processing Files (0 / 1)      :  21%|██▏       | 22.7MB /  106MB, 1.47MB/s
+
+New Data Upload               :  21%|██▏       | 22.7MB /  106MB, 1.47MB/s  [A
+
+
+  final_model.pt              :  22%|██▏       | 23.3MB /  106MB            [A[A
+Processing Files (0 / 1)      :  22%|██▏       | 23.3MB /  106MB, 1.47MB/s
+
+New Data Upload               :  22%|██▏       | 23.3MB /  106MB, 1.47MB/s  [A
+
+
+  final_model.pt              :  22%|██▏       | 23.3MB /  106MB            [A[A
+
+
+  final_model.pt              :  23%|██▎       | 24.4MB /  106MB            [A[A
+Processing Files (0 / 1)      :  23%|██▎       | 24.4MB /  106MB, 1.58MB/s
+
+New Data Upload               :  23%|██▎       | 24.4MB /  106MB, 1.58MB/s  [A
+
+
+  final_model.pt              :  23%|██▎       | 24.4MB /  106MB            [A[A
+
+
+  final_model.pt              :  23%|██▎       | 25.0MB /  106MB            [A[A
+Processing Files (0 / 1)      :  23%|██▎       | 25.0MB /  106MB, 1.58MB/s
+
+New Data Upload               :  23%|██▎       | 25.0MB /  106MB, 1.58MB/s  [A
+
+
+  final_model.pt              :  23%|██▎       | 25.0MB /  106MB            [A[A
+
+
+  final_model.pt              :  24%|██▍       | 25.5MB /  106MB            [A[A
+Processing Files (0 / 1)      :  24%|██▍       | 25.5MB /  106MB, 1.58MB/s
+
+New Data Upload               :  24%|██▍       | 25.5MB /  106MB, 1.58MB/s  [A
+
+
+  final_model.pt              :  25%|██▍       | 26.1MB /  106MB            [A[A
+Processing Files (0 / 1)      :  25%|██▍       | 26.1MB /  106MB, 1.63MB/s
+
+New Data Upload               :  25%|██▍       | 26.1MB /  106MB, 1.63MB/s  [A
+
+
+  final_model.pt              :  25%|██▍       | 26.1MB /  106MB            [A[A
+
+
+  final_model.pt              :  25%|██▌       | 26.6MB /  106MB            [A[A
+Processing Files (0 / 1)      :  25%|██▌       | 26.6MB /  106MB, 1.63MB/s
+
+New Data Upload               :  25%|██▌       | 26.6MB /  106MB, 1.63MB/s  [A
+
+
+  final_model.pt              :  26%|██▌       | 27.2MB /  106MB            [A[A
+Processing Files (0 / 1)      :  26%|██▌       | 27.2MB /  106MB, 1.63MB/s
+
+New Data Upload               :  26%|██▌       | 27.2MB /  106MB, 1.63MB/s  [A
+
+
+  final_model.pt              :  26%|██▌       | 27.2MB /  106MB            [A[A
+
+
+  final_model.pt              :  26%|██▌       | 27.7MB /  106MB            [A[A
+Processing Files (0 / 1)      :  26%|██▌       | 27.7MB /  106MB, 1.69MB/s
+
+New Data Upload               :  26%|██▌       | 27.7MB /  106MB, 1.69MB/s  [A
+
+
+  final_model.pt              :  27%|██▋       | 28.3MB /  106MB            [A[A
+Processing Files (0 / 1)      :  27%|██▋       | 28.3MB /  106MB, 1.69MB/s
+
+New Data Upload               :  27%|██▋       | 28.3MB /  106MB, 1.69MB/s  [A
+
+
+  final_model.pt              :  27%|██▋       | 28.3MB /  106MB            [A[A
+
+
+  final_model.pt              :  27%|██▋       | 28.8MB /  106MB            [A[A
+Processing Files (0 / 1)      :  27%|██▋       | 28.8MB /  106MB, 1.69MB/s
+
+New Data Upload               :  27%|██▋       | 28.8MB /  106MB, 1.69MB/s  [A
+
+
+  final_model.pt              :  28%|██▊       | 29.4MB /  106MB            [A[A
+Processing Files (0 / 1)      :  28%|██▊       | 29.4MB /  106MB, 1.74MB/s
+
+New Data Upload               :  28%|██▊       | 29.4MB /  106MB, 1.74MB/s  [A
+
+
+  final_model.pt              :  28%|██▊       | 29.4MB /  106MB            [A[A
+
+
+  final_model.pt              :  28%|██▊       | 29.9MB /  106MB            [A[A
+Processing Files (0 / 1)      :  28%|██▊       | 29.9MB /  106MB, 1.74MB/s
+
+New Data Upload               :  28%|██▊       | 29.9MB /  106MB, 1.74MB/s  [A
+
+
+  final_model.pt              :  29%|██▉       | 31.1MB /  106MB            [A[A
+Processing Files (0 / 1)      :  29%|██▉       | 31.1MB /  106MB, 1.85MB/s
+
+New Data Upload               :  29%|██▉       | 31.1MB /  106MB, 1.85MB/s  [A
+
+
+  final_model.pt              :  29%|██▉       | 31.1MB /  106MB            [A[A
+
+
+  final_model.pt              :  30%|██▉       | 31.6MB /  106MB            [A[A
+Processing Files (0 / 1)      :  30%|██▉       | 31.6MB /  106MB, 1.85MB/s
+
+New Data Upload               :  30%|██▉       | 31.6MB /  106MB, 1.85MB/s  [A
+
+
+  final_model.pt              :  30%|███       | 32.2MB /  106MB            [A[A
+Processing Files (0 / 1)      :  30%|███       | 32.2MB /  106MB, 1.85MB/s
+
+New Data Upload               :  30%|███       | 32.2MB /  106MB, 1.85MB/s  [A
+
+
+  final_model.pt              :  30%|███       | 32.2MB /  106MB            [A[A
+
+
+  final_model.pt              :  31%|███       | 32.7MB /  106MB            [A[A
+Processing Files (0 / 1)      :  31%|███       | 32.7MB /  106MB, 1.85MB/s
+
+New Data Upload               :  31%|███       | 32.7MB /  106MB, 1.85MB/s  [A
+
+
+  final_model.pt              :  31%|███▏      | 33.3MB /  106MB            [A[A
+Processing Files (0 / 1)      :  31%|███▏      | 33.3MB /  106MB, 1.90MB/s
+
+New Data Upload               :  31%|███▏      | 33.3MB /  106MB, 1.90MB/s  [A
+
+
+  final_model.pt              :  32%|███▏      | 33.8MB /  106MB            [A[A
+Processing Files (0 / 1)      :  32%|███▏      | 33.8MB /  106MB, 1.90MB/s
+
+New Data Upload               :  32%|███▏      | 33.8MB /  106MB, 1.90MB/s  [A
+
+
+  final_model.pt              :  32%|███▏      | 34.4MB /  106MB            [A[A
+Processing Files (0 / 1)      :  32%|███▏      | 34.4MB /  106MB, 1.96MB/s
+
+New Data Upload               :  32%|███▏      | 34.4MB /  106MB, 1.96MB/s  [A
+
+
+  final_model.pt              :  33%|███▎      | 34.9MB /  106MB            [A[A
+Processing Files (0 / 1)      :  33%|███▎      | 34.9MB /  106MB, 1.96MB/s
+
+New Data Upload               :  33%|███▎      | 34.9MB /  106MB, 1.96MB/s  [A
+
+
+  final_model.pt              :  33%|███▎      | 34.9MB /  106MB            [A[A
+
+
+  final_model.pt              :  33%|███▎      | 35.5MB /  106MB            [A[A
+Processing Files (0 / 1)      :  33%|███▎      | 35.5MB /  106MB, 1.90MB/s
+
+New Data Upload               :  33%|███▎      | 35.5MB /  106MB, 1.90MB/s  [A
+
+
+  final_model.pt              :  34%|███▍      | 36.0MB /  106MB            [A[A
+Processing Files (0 / 1)      :  34%|███▍      | 36.0MB /  106MB, 1.90MB/s
+
+New Data Upload               :  34%|███▍      | 36.0MB /  106MB, 1.90MB/s  [A
+
+
+  final_model.pt              :  34%|███▍      | 36.6MB /  106MB            [A[A
+Processing Files (0 / 1)      :  34%|███▍      | 36.6MB /  106MB, 1.96MB/s
+
+New Data Upload               :  34%|███▍      | 36.6MB /  106MB, 1.96MB/s  [A
+
+
+  final_model.pt              :  35%|███▍      | 37.2MB /  106MB            [A[A
+Processing Files (0 / 1)      :  35%|███▍      | 37.2MB /  106MB, 1.96MB/s
+
+New Data Upload               :  35%|███▍      | 37.2MB /  106MB, 1.96MB/s  [A
+
+
+  final_model.pt              :  35%|███▍      | 37.2MB /  106MB            [A[A
+
+
+  final_model.pt              :  35%|███▌      | 37.7MB /  106MB            [A[A
+Processing Files (0 / 1)      :  35%|███▌      | 37.7MB /  106MB, 1.96MB/s
+
+New Data Upload               :  35%|███▌      | 37.7MB /  106MB, 1.96MB/s  [A
+
+
+  final_model.pt              :  35%|███▌      | 37.7MB /  106MB            [A[A
+
+
+  final_model.pt              :  37%|███▋      | 38.8MB /  106MB            [A[A
+Processing Files (0 / 1)      :  37%|███▋      | 38.8MB /  106MB, 2.01MB/s
+
+New Data Upload               :  37%|███▋      | 38.8MB /  106MB, 2.01MB/s  [A
+
+
+  final_model.pt              :  37%|███▋      | 38.8MB /  106MB            [A[A
+
+
+  final_model.pt              :  37%|███▋      | 39.4MB /  106MB            [A[A
+Processing Files (0 / 1)      :  37%|███▋      | 39.4MB /  106MB, 2.01MB/s
+
+New Data Upload               :  37%|███▋      | 39.4MB /  106MB, 2.01MB/s  [A
+
+
+  final_model.pt              :  37%|███▋      | 39.4MB /  106MB            [A[A
+
+
+  final_model.pt              :  38%|███▊      | 39.9MB /  106MB            [A[A
+Processing Files (0 / 1)      :  38%|███▊      | 39.9MB /  106MB, 2.01MB/s
+
+New Data Upload               :  38%|███▊      | 39.9MB /  106MB, 2.01MB/s  [A
+
+
+  final_model.pt              :  38%|███▊      | 39.9MB /  106MB            [A[A
+
+
+  final_model.pt              :  38%|███▊      | 40.5MB /  106MB            [A[A
+Processing Files (0 / 1)      :  38%|███▊      | 40.5MB /  106MB, 1.96MB/s
+
+New Data Upload               :  38%|███▊      | 40.5MB /  106MB, 1.96MB/s  [A
+
+
+  final_model.pt              :  38%|███▊      | 40.5MB /  106MB            [A[A
+
+
+  final_model.pt              :  39%|███▊      | 41.0MB /  106MB            [A[A
+Processing Files (0 / 1)      :  39%|███▊      | 41.0MB /  106MB, 1.96MB/s
+
+New Data Upload               :  39%|███▊      | 41.0MB /  106MB, 1.96MB/s  [A
+
+
+  final_model.pt              :  40%|███▉      | 42.1MB /  106MB            [A[A
+Processing Files (0 / 1)      :  40%|███▉      | 42.1MB /  106MB, 2.01MB/s
+
+New Data Upload               :  40%|███▉      | 42.1MB /  106MB, 2.01MB/s  [A
+
+
+  final_model.pt              :  40%|███▉      | 42.1MB /  106MB            [A[A
+
+
+  final_model.pt              :  40%|████      | 42.7MB /  106MB            [A[A
+Processing Files (0 / 1)      :  40%|████      | 42.7MB /  106MB, 2.01MB/s
+
+New Data Upload               :  40%|████      | 42.7MB /  106MB, 2.01MB/s  [A
+
+
+  final_model.pt              :  40%|████      | 42.7MB /  106MB            [A[A
+
+
+  final_model.pt              :  41%|████      | 43.3MB /  106MB            [A[A
+Processing Files (0 / 1)      :  41%|████      | 43.3MB /  106MB, 2.01MB/s
+
+New Data Upload               :  41%|████      | 43.3MB /  106MB, 2.01MB/s  [A
+
+
+  final_model.pt              :  41%|████      | 43.3MB /  106MB            [A[A
+
+
+  final_model.pt              :  41%|████      | 43.8MB /  106MB            [A[A
+Processing Files (0 / 1)      :  41%|████      | 43.8MB /  106MB, 2.01MB/s
+
+New Data Upload               :  41%|████      | 43.8MB /  106MB, 2.01MB/s  [A
+
+
+  final_model.pt              :  42%|████▏     | 44.4MB /  106MB            [A[A
+Processing Files (0 / 1)      :  42%|████▏     | 44.4MB /  106MB, 1.96MB/s
+
+New Data Upload               :  42%|████▏     | 44.4MB /  106MB, 1.96MB/s  [A
+
+
+  final_model.pt              :  42%|████▏     | 44.4MB /  106MB            [A[A
+
+
+  final_model.pt              :  42%|████▏     | 44.9MB /  106MB            [A[A
+Processing Files (0 / 1)      :  42%|████▏     | 44.9MB /  106MB, 1.96MB/s
+
+New Data Upload               :  42%|████▏     | 44.9MB /  106MB, 1.96MB/s  [A
+
+
+  final_model.pt              :  43%|████▎     | 45.5MB /  106MB            [A[A
+Processing Files (0 / 1)      :  43%|████▎     | 45.5MB /  106MB, 2.01MB/s
+
+New Data Upload               :  43%|████▎     | 45.5MB /  106MB, 2.01MB/s  [A
+
+
+  final_model.pt              :  43%|████▎     | 46.0MB /  106MB            [A[A
+Processing Files (0 / 1)      :  43%|████▎     | 46.0MB /  106MB, 2.01MB/s
+
+New Data Upload               :  43%|████▎     | 46.0MB /  106MB, 2.01MB/s  [A
+
+
+  final_model.pt              :  43%|████▎     | 46.0MB /  106MB            [A[A
+
+
+  final_model.pt              :  44%|████▍     | 46.6MB /  106MB            [A[A
+Processing Files (0 / 1)      :  44%|████▍     | 46.6MB /  106MB, 2.01MB/s
+
+New Data Upload               :  44%|████▍     | 46.6MB /  106MB, 2.01MB/s  [A
+
+
+  final_model.pt              :  44%|████▍     | 47.1MB /  106MB            [A[A
+Processing Files (0 / 1)      :  44%|████▍     | 47.1MB /  106MB, 2.01MB/s
+
+New Data Upload               :  44%|████▍     | 47.1MB /  106MB, 2.01MB/s  [A
+
+
+  final_model.pt              :  44%|████▍     | 47.1MB /  106MB            [A[A
+
+
+  final_model.pt              :  45%|████▍     | 47.7MB /  106MB            [A[A
+Processing Files (0 / 1)      :  45%|████▍     | 47.7MB /  106MB, 2.01MB/s
+
+New Data Upload               :  45%|████▍     | 47.7MB /  106MB, 2.01MB/s  [A
+
+
+  final_model.pt              :  45%|████▌     | 48.2MB /  106MB            [A[A
+Processing Files (0 / 1)      :  45%|████▌     | 48.2MB /  106MB, 2.01MB/s
+
+New Data Upload               :  45%|████▌     | 48.2MB /  106MB, 2.01MB/s  [A
+
+
+  final_model.pt              :  46%|████▌     | 48.8MB /  106MB            [A[A
+Processing Files (0 / 1)      :  46%|████▌     | 48.8MB /  106MB, 2.01MB/s
+
+New Data Upload               :  46%|████▌     | 48.8MB /  106MB, 2.01MB/s  [A
+
+
+  final_model.pt              :  46%|████▌     | 48.8MB /  106MB            [A[A
+
+
+  final_model.pt              :  47%|████▋     | 49.9MB /  106MB            [A[A
+Processing Files (0 / 1)      :  47%|████▋     | 49.9MB /  106MB, 2.07MB/s
+
+New Data Upload               :  47%|████▋     | 49.9MB /  106MB, 2.07MB/s  [A
+
+
+  final_model.pt              :  47%|████▋     | 50.5MB /  106MB            [A[A
+Processing Files (0 / 1)      :  47%|████▋     | 50.5MB /  106MB, 2.07MB/s
+
+New Data Upload               :  47%|████▋     | 50.5MB /  106MB, 2.07MB/s  [A
+
+
+  final_model.pt              :  47%|████▋     | 50.5MB /  106MB            [A[A
+
+
+  final_model.pt              :  48%|████▊     | 51.0MB /  106MB            [A[A
+Processing Files (0 / 1)      :  48%|████▊     | 51.0MB /  106MB, 2.07MB/s
+
+New Data Upload               :  48%|████▊     | 51.0MB /  106MB, 2.07MB/s  [A
+
+
+  final_model.pt              :  49%|████▊     | 51.6MB /  106MB            [A[A
+Processing Files (0 / 1)      :  49%|████▊     | 51.6MB /  106MB, 2.01MB/s
+
+New Data Upload               :  49%|████▊     | 51.6MB /  106MB, 2.01MB/s  [A
+
+
+  final_model.pt              :  49%|████▊     | 51.6MB /  106MB            [A[A
+
+
+  final_model.pt              :  49%|████▉     | 52.1MB /  106MB            [A[A
+Processing Files (0 / 1)      :  49%|████▉     | 52.1MB /  106MB, 2.01MB/s
+
+New Data Upload               :  49%|████▉     | 52.1MB /  106MB, 2.01MB/s  [A
+
+
+  final_model.pt              :  50%|████▉     | 52.7MB /  106MB            [A[A
+Processing Files (0 / 1)      :  50%|████▉     | 52.7MB /  106MB, 2.01MB/s
+
+New Data Upload               :  50%|████▉     | 52.7MB /  106MB, 2.01MB/s  [A
+
+
+  final_model.pt              :  50%|████▉     | 52.7MB /  106MB            [A[A
+
+
+  final_model.pt              :  51%|█████     | 53.8MB /  106MB            [A[A
+Processing Files (0 / 1)      :  51%|█████     | 53.8MB /  106MB, 2.07MB/s
+
+New Data Upload               :  51%|█████     | 53.8MB /  106MB, 2.07MB/s  [A
+
+
+  final_model.pt              :  51%|█████     | 54.3MB /  106MB            [A[A
+Processing Files (0 / 1)      :  51%|█████     | 54.3MB /  106MB, 2.07MB/s
+
+New Data Upload               :  51%|█████     | 54.3MB /  106MB, 2.07MB/s  [A
+
+
+  final_model.pt              :  51%|█████     | 54.3MB /  106MB            [A[A
+
+
+  final_model.pt              :  52%|█████▏    | 54.9MB /  106MB            [A[A
+Processing Files (0 / 1)      :  52%|█████▏    | 54.9MB /  106MB, 2.01MB/s
+
+New Data Upload               :  52%|█████▏    | 54.9MB /  106MB, 2.01MB/s  [A
+
+
+  final_model.pt              :  52%|█████▏    | 55.5MB /  106MB            [A[A
+Processing Files (0 / 1)      :  52%|█████▏    | 55.5MB /  106MB, 2.01MB/s
+
+New Data Upload               :  52%|█████▏    | 55.5MB /  106MB, 2.01MB/s  [A
+
+
+  final_model.pt              :  52%|█████▏    | 55.5MB /  106MB            [A[A
+
+
+  final_model.pt              :  53%|█████▎    | 56.6MB /  106MB            [A[A
+Processing Files (0 / 1)      :  53%|█████▎    | 56.6MB /  106MB, 2.07MB/s
+
+New Data Upload               :  53%|█████▎    | 56.6MB /  106MB, 2.07MB/s  [A
+
+
+  final_model.pt              :  54%|█████▎    | 57.1MB /  106MB            [A[A
+Processing Files (0 / 1)      :  54%|█████▎    | 57.1MB /  106MB, 2.07MB/s
+
+New Data Upload               :  54%|█████▎    | 57.1MB /  106MB, 2.07MB/s  [A
+
+
+  final_model.pt              :  54%|█████▎    | 57.1MB /  106MB            [A[A
+
+
+  final_model.pt              :  54%|█████▍    | 57.7MB /  106MB            [A[A
+Processing Files (0 / 1)      :  54%|█████▍    | 57.7MB /  106MB, 2.01MB/s
+
+New Data Upload               :  54%|█████▍    | 57.7MB /  106MB, 2.01MB/s  [A
+
+
+  final_model.pt              :  55%|█████▌    | 58.8MB /  106MB            [A[A
+Processing Files (0 / 1)      :  55%|█████▌    | 58.8MB /  106MB, 2.12MB/s
+
+New Data Upload               :  55%|█████▌    | 58.8MB /  106MB, 2.12MB/s  [A
+
+
+  final_model.pt              :  55%|█████▌    | 58.8MB /  106MB            [A[A
+
+
+  final_model.pt              :  56%|█████▌    | 59.3MB /  106MB            [A[A
+Processing Files (0 / 1)      :  56%|█████▌    | 59.3MB /  106MB, 2.12MB/s
+
+New Data Upload               :  56%|█████▌    | 59.3MB /  106MB, 2.12MB/s  [A
+
+
+  final_model.pt              :  56%|█████▋    | 59.9MB /  106MB            [A[A
+Processing Files (0 / 1)      :  56%|█████▋    | 59.9MB /  106MB, 2.07MB/s
+
+New Data Upload               :  56%|█████▋    | 59.9MB /  106MB, 2.07MB/s  [A
+
+
+  final_model.pt              :  56%|█████▋    | 59.9MB /  106MB            [A[A
+
+
+  final_model.pt              :  57%|█████▋    | 61.0MB /  106MB            [A[A
+Processing Files (0 / 1)      :  57%|█████▋    | 61.0MB /  106MB, 2.12MB/s
+
+New Data Upload               :  57%|█████▋    | 61.0MB /  106MB, 2.12MB/s  [A
+
+
+  final_model.pt              :  57%|█████▋    | 61.0MB /  106MB            [A[A
+
+
+  final_model.pt              :  58%|█████▊    | 61.6MB /  106MB            [A[A
+Processing Files (0 / 1)      :  58%|█████▊    | 61.6MB /  106MB, 2.12MB/s
+
+New Data Upload               :  58%|█████▊    | 61.6MB /  106MB, 2.12MB/s  [A
+
+
+  final_model.pt              :  58%|█████▊    | 62.1MB /  106MB            [A[A
+Processing Files (0 / 1)      :  58%|█████▊    | 62.1MB /  106MB, 2.17MB/s
+
+New Data Upload               :  58%|█████▊    | 62.1MB /  106MB, 2.17MB/s  [A
+
+
+  final_model.pt              :  58%|█████▊    | 62.1MB /  106MB            [A[A
+
+
+  final_model.pt              :  59%|█████▉    | 62.7MB /  106MB            [A[A
+Processing Files (0 / 1)      :  59%|█████▉    | 62.7MB /  106MB, 2.17MB/s
+
+New Data Upload               :  59%|█████▉    | 62.7MB /  106MB, 2.17MB/s  [A
+
+
+  final_model.pt              :  59%|█████▉    | 62.7MB /  106MB            [A[A
+
+
+  final_model.pt              :  59%|█████▉    | 63.2MB /  106MB            [A[A
+Processing Files (0 / 1)      :  59%|█████▉    | 63.2MB /  106MB, 2.07MB/s
+
+New Data Upload               :  59%|█████▉    | 63.2MB /  106MB, 2.07MB/s  [A
+
+
+  final_model.pt              :  59%|█████▉    | 63.2MB /  106MB            [A[A
+
+
+  final_model.pt              :  60%|██████    | 63.8MB /  106MB            [A[A
+Processing Files (0 / 1)      :  60%|██████    | 63.8MB /  106MB, 2.07MB/s
+
+New Data Upload               :  60%|██████    | 63.8MB /  106MB, 2.07MB/s  [A
+
+
+  final_model.pt              :  60%|██████    | 63.8MB /  106MB            [A[A
+
+
+  final_model.pt              :  61%|██████    | 64.3MB /  106MB            [A[A
+Processing Files (0 / 1)      :  61%|██████    | 64.3MB /  106MB, 2.07MB/s
+
+New Data Upload               :  61%|██████    | 64.3MB /  106MB, 2.07MB/s  [A
+
+
+  final_model.pt              :  61%|██████    | 64.3MB /  106MB            [A[A
+
+
+  final_model.pt              :  61%|██████    | 64.9MB /  106MB            [A[A
+Processing Files (0 / 1)      :  61%|██████    | 64.9MB /  106MB, 2.07MB/s
+
+New Data Upload               :  61%|██████    | 64.9MB /  106MB, 2.07MB/s  [A
+
+
+  final_model.pt              :  61%|██████    | 64.9MB /  106MB            [A[A
+
+
+  final_model.pt              :  62%|██████▏   | 65.4MB /  106MB            [A[A
+Processing Files (0 / 1)      :  62%|██████▏   | 65.4MB /  106MB, 2.07MB/s
+
+New Data Upload               :  62%|██████▏   | 65.4MB /  106MB, 2.07MB/s  [A
+
+
+  final_model.pt              :  62%|██████▏   | 65.4MB /  106MB            [A[A
+
+
+  final_model.pt              :  62%|██████▏   | 66.0MB /  106MB            [A[A
+Processing Files (0 / 1)      :  62%|██████▏   | 66.0MB /  106MB, 2.01MB/s
+
+New Data Upload               :  62%|██████▏   | 66.0MB /  106MB, 2.01MB/s  [A
+
+
+  final_model.pt              :  62%|██████▏   | 66.0MB /  106MB            [A[A
+
+
+  final_model.pt              :  63%|██████▎   | 66.5MB /  106MB            [A[A
+Processing Files (0 / 1)      :  63%|██████▎   | 66.5MB /  106MB, 2.01MB/s
+
+New Data Upload               :  63%|██████▎   | 66.5MB /  106MB, 2.01MB/s  [A
+
+
+  final_model.pt              :  63%|██████▎   | 66.5MB /  106MB            [A[A
+
+
+  final_model.pt              :  63%|██████▎   | 66.5MB /  106MB            [A[A
+
+
+  final_model.pt              :  63%|██████▎   | 66.5MB /  106MB            [A[A
+
+
+  final_model.pt              :  63%|██████▎   | 66.5MB /  106MB            [A[A
+
+
+  final_model.pt              :  63%|██████▎   | 66.5MB /  106MB            [A[A
+
+
+  final_model.pt              :  63%|██████▎   | 66.5MB /  106MB            [A[A
+
+
+  final_model.pt              :  63%|██████▎   | 67.1MB /  106MB            [A[A
+Processing Files (0 / 1)      :  63%|██████▎   | 67.1MB /  106MB, 1.79MB/s
+
+New Data Upload               :  63%|██████▎   | 67.1MB /  106MB, 1.79MB/s  [A
+
+
+  final_model.pt              :  64%|██████▎   | 67.6MB /  106MB            [A[A
+Processing Files (0 / 1)      :  64%|██████▎   | 67.6MB /  106MB, 1.74MB/s
+
+New Data Upload               :  64%|██████▎   | 67.6MB /  106MB, 1.74MB/s  [A
+
+
+  final_model.pt              :  64%|██████▎   | 67.6MB /  106MB            [A[A
+
+
+  final_model.pt              :  64%|██████▎   | 67.6MB /  106MB            [A[A
+
+
+  final_model.pt              :  64%|██████▎   | 67.6MB /  106MB            [A[A
+
+
+  final_model.pt              :  64%|██████▎   | 67.6MB /  106MB            [A[A
+
+
+  final_model.pt              :  65%|██████▍   | 68.7MB /  106MB            [A[A
+Processing Files (0 / 1)      :  65%|██████▍   | 68.7MB /  106MB, 1.68MB/s
+
+New Data Upload               :  65%|██████▍   | 68.7MB /  106MB, 1.68MB/s  [A
+
+
+  final_model.pt              :  65%|██████▍   | 68.7MB /  106MB            [A[A
+
+
+  final_model.pt              :  65%|██████▍   | 68.7MB /  106MB            [A[A
+
+
+  final_model.pt              :  65%|██████▍   | 68.7MB /  106MB            [A[A
+
+
+  final_model.pt              :  65%|██████▌   | 69.3MB /  106MB            [A[A
+Processing Files (0 / 1)      :  65%|██████▌   | 69.3MB /  106MB, 1.52MB/s
+
+New Data Upload               :  65%|██████▌   | 69.3MB /  106MB, 1.52MB/s  [A
+
+
+  final_model.pt              :  65%|██████▌   | 69.3MB /  106MB            [A[A
+
+
+  final_model.pt              :  65%|██████▌   | 69.3MB /  106MB            [A[A
+
+
+  final_model.pt              :  66%|██████▌   | 69.8MB /  106MB            [A[A
+Processing Files (0 / 1)      :  66%|██████▌   | 69.8MB /  106MB, 1.46MB/s
+
+New Data Upload               :  66%|██████▌   | 69.8MB /  106MB, 1.46MB/s  [A
+
+
+  final_model.pt              :  66%|██████▌   | 69.8MB /  106MB            [A[A
+
+
+  final_model.pt              :  66%|██████▌   | 69.8MB /  106MB            [A[A
+
+
+  final_model.pt              :  66%|██████▌   | 69.8MB /  106MB            [A[A
+
+
+  final_model.pt              :  66%|██████▌   | 70.4MB /  106MB            [A[A
+Processing Files (0 / 1)      :  66%|██████▌   | 70.4MB /  106MB, 1.30MB/s
+
+New Data Upload               :  66%|██████▌   | 70.4MB /  106MB, 1.30MB/s  [A
+
+
+  final_model.pt              :  66%|██████▌   | 70.4MB /  106MB            [A[A
+
+
+  final_model.pt              :  66%|██████▌   | 70.4MB /  106MB            [A[A
+
+
+  final_model.pt              :  66%|██████▌   | 70.4MB /  106MB            [A[A
+
+
+  final_model.pt              :  67%|██████▋   | 70.9MB /  106MB            [A[A
+Processing Files (0 / 1)      :  67%|██████▋   | 70.9MB /  106MB, 1.19MB/s
+
+New Data Upload               :  67%|██████▋   | 70.9MB /  106MB, 1.19MB/s  [A
+
+
+  final_model.pt              :  67%|██████▋   | 70.9MB /  106MB            [A[A
+
+
+  final_model.pt              :  67%|██████▋   | 70.9MB /  106MB            [A[A
+
+
+  final_model.pt              :  67%|██████▋   | 71.5MB /  106MB            [A[A
+Processing Files (0 / 1)      :  67%|██████▋   | 71.5MB /  106MB, 1.14MB/s
+
+New Data Upload               :  67%|██████▋   | 71.5MB /  106MB, 1.14MB/s  [A
+
+
+  final_model.pt              :  67%|██████▋   | 71.5MB /  106MB            [A[A
+
+
+  final_model.pt              :  67%|██████▋   | 71.5MB /  106MB            [A[A
+
+
+  final_model.pt              :  68%|██████▊   | 72.1MB /  106MB            [A[A
+Processing Files (0 / 1)      :  68%|██████▊   | 72.1MB /  106MB, 1.03MB/s
+
+New Data Upload               :  68%|██████▊   | 72.1MB /  106MB, 1.03MB/s  [A
+
+
+  final_model.pt              :  68%|██████▊   | 72.1MB /  106MB            [A[A
+
+
+  final_model.pt              :  68%|██████▊   | 72.1MB /  106MB            [A[A
+
+
+  final_model.pt              :  68%|██████▊   | 72.6MB /  106MB            [A[A
+Processing Files (0 / 1)      :  68%|██████▊   | 72.6MB /  106MB,  975kB/s
+
+New Data Upload               :  68%|██████▊   | 72.6MB /  106MB,  975kB/s  [A
+
+
+  final_model.pt              :  68%|██████▊   | 72.6MB /  106MB            [A[A
+
+
+  final_model.pt              :  69%|██████▉   | 73.2MB /  106MB            [A[A
+Processing Files (0 / 1)      :  69%|██████▉   | 73.2MB /  106MB,  974kB/s
+
+New Data Upload               :  69%|██████▉   | 73.2MB /  106MB,  974kB/s  [A
+
+
+  final_model.pt              :  69%|██████▉   | 73.2MB /  106MB            [A[A
+
+
+  final_model.pt              :  69%|██████▉   | 73.2MB /  106MB            [A[A
+
+
+  final_model.pt              :  69%|██████▉   | 73.2MB /  106MB            [A[A
+
+
+  final_model.pt              :  69%|██████▉   | 73.2MB /  106MB            [A[A
+
+
+  final_model.pt              :  69%|██████▉   | 73.7MB /  106MB            [A[A
+Processing Files (0 / 1)      :  69%|██████▉   | 73.7MB /  106MB,  920kB/s
+
+New Data Upload               :  69%|██████▉   | 73.7MB /  106MB,  920kB/s  [A
+
+
+  final_model.pt              :  69%|██████▉   | 73.7MB /  106MB            [A[A
+
+
+  final_model.pt              :  69%|██████▉   | 73.7MB /  106MB            [A[A
+
+
+  final_model.pt              :  69%|██████▉   | 73.7MB /  106MB            [A[A
+
+
+  final_model.pt              :  69%|██████▉   | 73.7MB /  106MB            [A[A
+
+
+  final_model.pt              :  70%|██████▉   | 74.3MB /  106MB            [A[A
+Processing Files (0 / 1)      :  70%|██████▉   | 74.3MB /  106MB,  811kB/s
+
+New Data Upload               :  70%|██████▉   | 74.3MB /  106MB,  811kB/s  [A
+
+
+  final_model.pt              :  70%|██████▉   | 74.3MB /  106MB            [A[A
+
+
+  final_model.pt              :  70%|██████▉   | 74.3MB /  106MB            [A[A
+
+
+  final_model.pt              :  70%|██████▉   | 74.3MB /  106MB            [A[A
+
+
+  final_model.pt              :  70%|███████   | 74.8MB /  106MB            [A[A
+Processing Files (0 / 1)      :  70%|███████   | 74.8MB /  106MB,  811kB/s
+
+New Data Upload               :  70%|███████   | 74.8MB /  106MB,  811kB/s  [A
+
+
+  final_model.pt              :  70%|███████   | 74.8MB /  106MB            [A[A
+
+
+  final_model.pt              :  70%|███████   | 74.8MB /  106MB            [A[A
+
+
+  final_model.pt              :  70%|███████   | 74.8MB /  106MB            [A[A
+
+
+  final_model.pt              :  71%|███████   | 75.4MB /  106MB            [A[A
+Processing Files (0 / 1)      :  71%|███████   | 75.4MB /  106MB,  865kB/s
+
+New Data Upload               :  71%|███████   | 75.4MB /  106MB,  865kB/s  [A
+
+
+  final_model.pt              :  71%|███████   | 75.4MB /  106MB            [A[A
+
+
+  final_model.pt              :  71%|███████   | 75.4MB /  106MB            [A[A
+
+
+  final_model.pt              :  71%|███████▏  | 75.9MB /  106MB            [A[A
+Processing Files (0 / 1)      :  71%|███████▏  | 75.9MB /  106MB,  813kB/s
+
+New Data Upload               :  71%|███████▏  | 75.9MB /  106MB,  813kB/s  [A
+
+
+  final_model.pt              :  71%|███████▏  | 75.9MB /  106MB            [A[A
+
+
+  final_model.pt              :  71%|███████▏  | 75.9MB /  106MB            [A[A
+
+
+  final_model.pt              :  71%|███████▏  | 75.9MB /  106MB            [A[A
+
+
+  final_model.pt              :  72%|███████▏  | 77.0MB /  106MB            [A[A
+Processing Files (0 / 1)      :  72%|███████▏  | 77.0MB /  106MB,  813kB/s
+
+New Data Upload               :  72%|███████▏  | 77.0MB /  106MB,  813kB/s  [A
+
+
+  final_model.pt              :  72%|███████▏  | 77.0MB /  106MB            [A[A
+
+
+  final_model.pt              :  73%|███████▎  | 77.6MB /  106MB            [A[A
+Processing Files (0 / 1)      :  73%|███████▎  | 77.6MB /  106MB,  867kB/s
+
+New Data Upload               :  73%|███████▎  | 77.6MB /  106MB,  867kB/s  [A
+
+
+  final_model.pt              :  73%|███████▎  | 77.6MB /  106MB            [A[A
+
+
+  final_model.pt              :  73%|███████▎  | 77.6MB /  106MB            [A[A
+
+
+  final_model.pt              :  74%|███████▎  | 78.1MB /  106MB            [A[A
+Processing Files (0 / 1)      :  74%|███████▎  | 78.1MB /  106MB,  867kB/s
+
+New Data Upload               :  74%|███████▎  | 78.1MB /  106MB,  867kB/s  [A
+
+
+  final_model.pt              :  74%|███████▎  | 78.1MB /  106MB            [A[A
+
+
+  final_model.pt              :  74%|███████▎  | 78.1MB /  106MB            [A[A
+
+
+  final_model.pt              :  74%|███████▍  | 78.7MB /  106MB            [A[A
+Processing Files (0 / 1)      :  74%|███████▍  | 78.7MB /  106MB,  867kB/s
+
+New Data Upload               :  74%|███████▍  | 78.7MB /  106MB,  867kB/s  [A
+
+
+  final_model.pt              :  74%|███████▍  | 78.7MB /  106MB            [A[A
+
+
+  final_model.pt              :  74%|███████▍  | 78.7MB /  106MB            [A[A
+
+
+  final_model.pt              :  75%|███████▍  | 79.2MB /  106MB            [A[A
+Processing Files (0 / 1)      :  75%|███████▍  | 79.2MB /  106MB,  867kB/s
+
+New Data Upload               :  75%|███████▍  | 79.2MB /  106MB,  867kB/s  [A
+
+
+  final_model.pt              :  75%|███████▍  | 79.2MB /  106MB            [A[A
+
+
+  final_model.pt              :  75%|███████▍  | 79.2MB /  106MB            [A[A
+
+
+  final_model.pt              :  75%|███████▌  | 79.8MB /  106MB            [A[A
+Processing Files (0 / 1)      :  75%|███████▌  | 79.8MB /  106MB,  921kB/s
+
+New Data Upload               :  75%|███████▌  | 79.8MB /  106MB,  921kB/s  [A
+
+
+  final_model.pt              :  75%|███████▌  | 79.8MB /  106MB            [A[A
+
+
+  final_model.pt              :  76%|███████▌  | 80.3MB /  106MB            [A[A
+Processing Files (0 / 1)      :  76%|███████▌  | 80.3MB /  106MB,  921kB/s
+
+New Data Upload               :  76%|███████▌  | 80.3MB /  106MB,  921kB/s  [A
+
+
+  final_model.pt              :  76%|███████▌  | 80.3MB /  106MB            [A[A
+
+
+  final_model.pt              :  76%|███████▌  | 80.3MB /  106MB            [A[A
+
+
+  final_model.pt              :  76%|███████▌  | 80.9MB /  106MB            [A[A
+Processing Files (0 / 1)      :  76%|███████▌  | 80.9MB /  106MB,  921kB/s
+
+New Data Upload               :  76%|███████▌  | 80.9MB /  106MB,  921kB/s  [A
+
+
+  final_model.pt              :  76%|███████▌  | 80.9MB /  106MB            [A[A
+
+
+  final_model.pt              :  77%|███████▋  | 81.5MB /  106MB            [A[A
+Processing Files (0 / 1)      :  77%|███████▋  | 81.5MB /  106MB,  921kB/s
+
+New Data Upload               :  77%|███████▋  | 81.5MB /  106MB,  921kB/s  [A
+
+
+  final_model.pt              :  77%|███████▋  | 81.5MB /  106MB            [A[A
+
+
+  final_model.pt              :  77%|███████▋  | 81.5MB /  106MB            [A[A
+
+
+  final_model.pt              :  77%|███████▋  | 82.0MB /  106MB            [A[A
+Processing Files (0 / 1)      :  77%|███████▋  | 82.0MB /  106MB,  921kB/s
+
+New Data Upload               :  77%|███████▋  | 82.0MB /  106MB,  921kB/s  [A
+
+
+  final_model.pt              :  77%|███████▋  | 82.0MB /  106MB            [A[A
+
+
+  final_model.pt              :  78%|███████▊  | 83.1MB /  106MB            [A[A
+Processing Files (0 / 1)      :  78%|███████▊  | 83.1MB /  106MB,  975kB/s
+
+New Data Upload               :  78%|███████▊  | 83.1MB /  106MB,  975kB/s  [A
+
+
+  final_model.pt              :  78%|███████▊  | 83.1MB /  106MB            [A[A
+
+
+  final_model.pt              :  79%|███████▊  | 83.7MB /  106MB            [A[A
+Processing Files (0 / 1)      :  79%|███████▊  | 83.7MB /  106MB, 1.03MB/s
+
+New Data Upload               :  79%|███████▊  | 83.7MB /  106MB, 1.03MB/s  [A
+
+
+  final_model.pt              :  79%|███████▊  | 83.7MB /  106MB            [A[A
+
+
+  final_model.pt              :  79%|███████▉  | 84.2MB /  106MB            [A[A
+Processing Files (0 / 1)      :  79%|███████▉  | 84.2MB /  106MB, 1.08MB/s
+
+New Data Upload               :  79%|███████▉  | 84.2MB /  106MB, 1.08MB/s  [A
+
+
+  final_model.pt              :  79%|███████▉  | 84.2MB /  106MB            [A[A
+
+
+  final_model.pt              :  80%|███████▉  | 84.8MB /  106MB            [A[A
+Processing Files (0 / 1)      :  80%|███████▉  | 84.8MB /  106MB, 1.08MB/s
+
+New Data Upload               :  80%|███████▉  | 84.8MB /  106MB, 1.08MB/s  [A
+
+
+  final_model.pt              :  80%|███████▉  | 84.8MB /  106MB            [A[A
+
+
+  final_model.pt              :  80%|████████  | 85.3MB /  106MB            [A[A
+Processing Files (0 / 1)      :  80%|████████  | 85.3MB /  106MB, 1.14MB/s
+
+New Data Upload               :  80%|████████  | 85.3MB /  106MB, 1.14MB/s  [A
+
+
+  final_model.pt              :  80%|████████  | 85.3MB /  106MB            [A[A
+
+
+  final_model.pt              :  80%|████████  | 85.3MB /  106MB            [A[A
+
+
+  final_model.pt              :  81%|████████  | 85.9MB /  106MB            [A[A
+Processing Files (0 / 1)      :  81%|████████  | 85.9MB /  106MB, 1.14MB/s
+
+New Data Upload               :  81%|████████  | 85.9MB /  106MB, 1.14MB/s  [A
+
+
+  final_model.pt              :  81%|████████  | 85.9MB /  106MB            [A[A
+
+
+  final_model.pt              :  81%|████████▏ | 86.4MB /  106MB            [A[A
+Processing Files (0 / 1)      :  81%|████████▏ | 86.4MB /  106MB, 1.19MB/s
+
+New Data Upload               :  81%|████████▏ | 86.4MB /  106MB, 1.19MB/s  [A
+
+
+  final_model.pt              :  81%|████████▏ | 86.4MB /  106MB            [A[A
+
+
+  final_model.pt              :  81%|████████▏ | 86.4MB /  106MB            [A[A
+
+
+  final_model.pt              :  82%|████████▏ | 87.0MB /  106MB            [A[A
+Processing Files (0 / 1)      :  82%|████████▏ | 87.0MB /  106MB, 1.19MB/s
+
+New Data Upload               :  82%|████████▏ | 87.0MB /  106MB, 1.19MB/s  [A
+
+
+  final_model.pt              :  82%|████████▏ | 87.0MB /  106MB            [A[A
+
+
+  final_model.pt              :  82%|████████▏ | 87.5MB /  106MB            [A[A
+Processing Files (0 / 1)      :  82%|████████▏ | 87.5MB /  106MB, 1.19MB/s
+
+New Data Upload               :  82%|████████▏ | 87.5MB /  106MB, 1.19MB/s  [A
+
+
+  final_model.pt              :  82%|████████▏ | 87.5MB /  106MB            [A[A
+
+
+  final_model.pt              :  83%|████████▎ | 88.1MB /  106MB            [A[A
+Processing Files (0 / 1)      :  83%|████████▎ | 88.1MB /  106MB, 1.25MB/s
+
+New Data Upload               :  83%|████████▎ | 88.1MB /  106MB, 1.25MB/s  [A
+
+
+  final_model.pt              :  83%|████████▎ | 88.1MB /  106MB            [A[A
+
+
+  final_model.pt              :  84%|████████▍ | 89.2MB /  106MB            [A[A
+Processing Files (0 / 1)      :  84%|████████▍ | 89.2MB /  106MB, 1.30MB/s
+
+New Data Upload               :  84%|████████▍ | 89.2MB /  106MB, 1.30MB/s  [A
+
+
+  final_model.pt              :  84%|████████▍ | 89.2MB /  106MB            [A[A
+
+
+  final_model.pt              :  84%|████████▍ | 89.7MB /  106MB            [A[A
+Processing Files (0 / 1)      :  84%|████████▍ | 89.7MB /  106MB, 1.35MB/s
+
+New Data Upload               :  84%|████████▍ | 89.7MB /  106MB, 1.35MB/s  [A
+
+
+  final_model.pt              :  84%|████████▍ | 89.7MB /  106MB            [A[A
+
+
+  final_model.pt              :  85%|████████▍ | 90.3MB /  106MB            [A[A
+Processing Files (0 / 1)      :  85%|████████▍ | 90.3MB /  106MB, 1.30MB/s
+
+New Data Upload               :  85%|████████▍ | 90.3MB /  106MB, 1.30MB/s  [A
+
+
+  final_model.pt              :  85%|████████▍ | 90.3MB /  106MB            [A[A
+
+
+  final_model.pt              :  85%|████████▌ | 90.8MB /  106MB            [A[A
+Processing Files (0 / 1)      :  85%|████████▌ | 90.8MB /  106MB, 1.30MB/s
+
+New Data Upload               :  85%|████████▌ | 90.8MB /  106MB, 1.30MB/s  [A
+
+
+  final_model.pt              :  85%|████████▌ | 90.8MB /  106MB            [A[A
+
+
+  final_model.pt              :  86%|████████▌ | 91.4MB /  106MB            [A[A
+Processing Files (0 / 1)      :  86%|████████▌ | 91.4MB /  106MB, 1.30MB/s
+
+New Data Upload               :  86%|████████▌ | 91.4MB /  106MB, 1.30MB/s  [A
+
+
+  final_model.pt              :  86%|████████▌ | 91.4MB /  106MB            [A[A
+
+
+  final_model.pt              :  87%|████████▋ | 92.0MB /  106MB            [A[A
+Processing Files (0 / 1)      :  87%|████████▋ | 92.0MB /  106MB, 1.35MB/s
+
+New Data Upload               :  87%|████████▋ | 92.0MB /  106MB, 1.35MB/s  [A
+
+
+  final_model.pt              :  87%|████████▋ | 92.5MB /  106MB            [A[A
+Processing Files (0 / 1)      :  87%|████████▋ | 92.5MB /  106MB, 1.35MB/s
+
+New Data Upload               :  87%|████████▋ | 92.5MB /  106MB, 1.35MB/s  [A
+
+
+  final_model.pt              :  87%|████████▋ | 92.5MB /  106MB            [A[A
+
+
+  final_model.pt              :  88%|████████▊ | 93.6MB /  106MB            [A[A
+Processing Files (0 / 1)      :  88%|████████▊ | 93.6MB /  106MB, 1.46MB/s
+
+New Data Upload               :  88%|████████▊ | 93.6MB /  106MB, 1.46MB/s  [A
+
+
+  final_model.pt              :  88%|████████▊ | 93.6MB /  106MB            [A[A
+
+
+  final_model.pt              :  89%|████████▊ | 94.2MB /  106MB            [A[A
+Processing Files (0 / 1)      :  89%|████████▊ | 94.2MB /  106MB, 1.46MB/s
+
+New Data Upload               :  89%|████████▊ | 94.2MB /  106MB, 1.46MB/s  [A
+
+
+  final_model.pt              :  89%|████████▊ | 94.2MB /  106MB            [A[A
+
+
+  final_model.pt              :  89%|████████▉ | 94.7MB /  106MB            [A[A
+Processing Files (0 / 1)      :  89%|████████▉ | 94.7MB /  106MB, 1.46MB/s
+
+New Data Upload               :  89%|████████▉ | 94.7MB /  106MB, 1.46MB/s  [A
+
+
+  final_model.pt              :  89%|████████▉ | 94.7MB /  106MB            [A[A
+
+
+  final_model.pt              :  90%|████████▉ | 95.3MB /  106MB            [A[A
+Processing Files (0 / 1)      :  90%|████████▉ | 95.3MB /  106MB, 1.46MB/s
+
+New Data Upload               :  90%|████████▉ | 95.3MB /  106MB, 1.46MB/s  [A
+
+
+  final_model.pt              :  90%|████████▉ | 95.3MB /  106MB            [A[A
+
+
+  final_model.pt              :  91%|█████████ | 96.4MB /  106MB            [A[A
+Processing Files (0 / 1)      :  91%|█████████ | 96.4MB /  106MB, 1.57MB/s
+
+New Data Upload               :  91%|█████████ | 96.4MB /  106MB, 1.57MB/s  [A
+
+
+  final_model.pt              :  91%|█████████ | 96.4MB /  106MB            [A[A
+
+
+  final_model.pt              :  91%|█████████ | 96.9MB /  106MB            [A[A
+Processing Files (0 / 1)      :  91%|█████████ | 96.9MB /  106MB, 1.57MB/s
+
+New Data Upload               :  91%|█████████ | 96.9MB /  106MB, 1.57MB/s  [A
+
+
+  final_model.pt              :  92%|█████████▏| 97.5MB /  106MB            [A[A
+Processing Files (0 / 1)      :  92%|█████████▏| 97.5MB /  106MB, 1.57MB/s
+
+New Data Upload               :  92%|█████████▏| 97.5MB /  106MB, 1.57MB/s  [A
+
+
+  final_model.pt              :  92%|█████████▏| 97.5MB /  106MB            [A[A
+
+
+  final_model.pt              :  92%|█████████▏| 98.0MB /  106MB            [A[A
+Processing Files (0 / 1)      :  92%|█████████▏| 98.0MB /  106MB, 1.63MB/s
+
+New Data Upload               :  92%|█████████▏| 98.0MB /  106MB, 1.63MB/s  [A
+
+
+  final_model.pt              :  93%|█████████▎| 98.6MB /  106MB            [A[A
+Processing Files (0 / 1)      :  93%|█████████▎| 98.6MB /  106MB, 1.63MB/s
+
+New Data Upload               :  93%|█████████▎| 98.6MB /  106MB, 1.63MB/s  [A
+
+
+  final_model.pt              :  93%|█████████▎| 98.6MB /  106MB            [A[A
+
+
+  final_model.pt              :  93%|█████████▎| 99.1MB /  106MB            [A[A
+Processing Files (0 / 1)      :  93%|█████████▎| 99.1MB /  106MB, 1.57MB/s
+
+New Data Upload               :  93%|█████████▎| 99.1MB /  106MB, 1.57MB/s  [A
+
+
+  final_model.pt              :  94%|█████████▍| 99.7MB /  106MB            [A[A
+Processing Files (0 / 1)      :  94%|█████████▍| 99.7MB /  106MB, 1.63MB/s
+
+New Data Upload               :  94%|█████████▍| 99.7MB /  106MB, 1.63MB/s  [A
+
+
+  final_model.pt              :  94%|█████████▍| 99.7MB /  106MB            [A[A
+
+
+  final_model.pt              :  94%|█████████▍|  100MB /  106MB            [A[A
+Processing Files (0 / 1)      :  94%|█████████▍|  100MB /  106MB, 1.63MB/s
+
+New Data Upload               :  94%|█████████▍|  100MB /  106MB, 1.63MB/s  [A
+
+
+  final_model.pt              :  95%|█████████▍|  101MB /  106MB            [A[A
+Processing Files (0 / 1)      :  95%|█████████▍|  101MB /  106MB, 1.63MB/s
+
+New Data Upload               :  95%|█████████▍|  101MB /  106MB, 1.63MB/s  [A
+
+
+  final_model.pt              :  95%|█████████▍|  101MB /  106MB            [A[A
+
+
+  final_model.pt              :  95%|█████████▌|  101MB /  106MB            [A[A
+Processing Files (0 / 1)      :  95%|█████████▌|  101MB /  106MB, 1.63MB/s
+
+New Data Upload               :  95%|█████████▌|  101MB /  106MB, 1.63MB/s  [A
+
+
+  final_model.pt              :  96%|█████████▋|  102MB /  106MB            [A[A
+Processing Files (0 / 1)      :  96%|█████████▋|  102MB /  106MB, 1.73MB/s
+
+New Data Upload               :  96%|█████████▋|  102MB /  106MB, 1.73MB/s  [A
+
+
+  final_model.pt              :  96%|█████████▋|  102MB /  106MB            [A[A
+
+
+  final_model.pt              :  97%|█████████▋|  103MB /  106MB            [A[A
+Processing Files (0 / 1)      :  97%|█████████▋|  103MB /  106MB, 1.73MB/s
+
+New Data Upload               :  97%|█████████▋|  103MB /  106MB, 1.73MB/s  [A
+
+
+  final_model.pt              :  97%|█████████▋|  104MB /  106MB            [A[A
+Processing Files (0 / 1)      :  97%|█████████▋|  104MB /  106MB, 1.79MB/s
+
+New Data Upload               :  97%|█████████▋|  104MB /  106MB, 1.79MB/s  [A
+
+
+  final_model.pt              :  98%|█████████▊|  104MB /  106MB            [A[A
+Processing Files (0 / 1)      :  98%|█████████▊|  104MB /  106MB, 1.79MB/s
+
+New Data Upload               :  98%|█████████▊|  104MB /  106MB, 1.79MB/s  [A
+
+
+  final_model.pt              :  98%|█████████▊|  104MB /  106MB            [A[A
+
+
+  final_model.pt              :  98%|█████████▊|  105MB /  106MB            [A[A
+Processing Files (0 / 1)      :  98%|█████████▊|  105MB /  106MB, 1.79MB/s
+
+New Data Upload               :  98%|█████████▊|  105MB /  106MB, 1.79MB/s  [A
+
+
+  final_model.pt              : 100%|█████████▉|  106MB /  106MB            [A[A
+Processing Files (0 / 1)      : 100%|█████████▉|  106MB /  106MB, 1.90MB/s
+
+New Data Upload               : 100%|█████████▉|  106MB /  106MB, 1.90MB/s  [A
+
+
+  final_model.pt              : 100%|█████████▉|  106MB /  106MB            [A[A
+
+
+  final_model.pt              : 100%|█████████▉|  106MB /  106MB            [A[A
+
+
+  final_model.pt              : 100%|█████████▉|  106MB /  106MB            [A[A
+
+
+  final_model.pt              : 100%|█████████▉|  106MB /  106MB            [A[A
+
+
+  final_model.pt              : 100%|█████████▉|  106MB /  106MB            [A[A
+
+
+  final_model.pt              : 100%|█████████▉|  106MB /  106MB            [A[A
+
+
+  final_model.pt              : 100%|██████████|  106MB /  106MB            [A[A
+Processing Files (1 / 1)      : 100%|██████████|  106MB /  106MB, 1.78MB/s
+
+New Data Upload               : 100%|██████████|  106MB /  106MB, 1.78MB/s  [A
+
+
+  final_model.pt              : 100%|██████████|  106MB /  106MB            [A[A
+
+
+  final_model.pt              : 100%|██████████|  106MB /  106MB            [A[A
+
+
+  final_model.pt              : 100%|██████████|  106MB /  106MB            [A[A
+
+
+  final_model.pt              : 100%|██████████|  106MB /  106MB            [A[A
+
+
+  final_model.pt              : 100%|██████████|  106MB /  106MB            [A[A
+
+
+  final_model.pt              : 100%|██████████|  106MB /  106MB            [A[A
+
+
+  final_model.pt              : 100%|██████████|  106MB /  106MB            [A[A
+
+
+  final_model.pt              : 100%|██████████|  106MB /  106MB            [A[A
+
+
+  final_model.pt              : 100%|██████████|  106MB /  106MB            [A[A
+
+
+  final_model.pt              : 100%|██████████|  106MB /  106MB            [A[A
+
+
+  final_model.pt              : 100%|██████████|  106MB /  106MB            [A[A
+
+
+  final_model.pt              : 100%|██████████|  106MB /  106MB            [A[A
+
+
+  final_model.pt              : 100%|██████████|  106MB /  106MB            [A[A
+
+
+  final_model.pt              : 100%|██████████|  106MB /  106MB            [A[A
+Processing Files (1 / 1)      : 100%|██████████|  106MB /  106MB, 1.27MB/s
+
+New Data Upload               : 100%|██████████|  106MB /  106MB, 1.27MB/s
+
+  final_model.pt              : 100%|██████████|  106MB /  106MB
+hf_upload:final_model.pt -> shikhar007/parameter-golf-gram-ns/models/seq4096_bankqat.pt
+
+Processing Files (0 / 0)      : |          |  0.00B /  0.00B
+
+New Data Upload               : |          |  0.00B /  0.00B            [A
+
+
+  final_model.int6.ptz        :   3%|▎         |  524kB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :   3%|▎         |  524kB / 16.1MB            [A[A
+Processing Files (0 / 1)      :   3%|▎         |  524kB / 16.1MB,   ???B/s
+
+New Data Upload               :   3%|▎         |  524kB / 16.1MB,   ???B/s  [A
+
+
+  final_model.int6.ptz        :   3%|▎         |  524kB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :   3%|▎         |  524kB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :   3%|▎         |  524kB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :   3%|▎         |  524kB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :   3%|▎         |  524kB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :  10%|▉         | 1.57MB / 16.1MB            [A[A
+Processing Files (0 / 1)      :  10%|▉         | 1.57MB / 16.1MB,  874kB/s
+
+New Data Upload               :  10%|▉         | 1.57MB / 16.1MB,  874kB/s  [A
+
+
+  final_model.int6.ptz        :  10%|▉         | 1.57MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :  10%|▉         | 1.57MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :  10%|▉         | 1.57MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :  10%|▉         | 1.57MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :  13%|█▎        | 2.10MB / 16.1MB            [A[A
+Processing Files (0 / 1)      :  13%|█▎        | 2.10MB / 16.1MB,  715kB/s
+
+New Data Upload               :  13%|█▎        | 2.10MB / 16.1MB,  715kB/s  [A
+
+
+  final_model.int6.ptz        :  13%|█▎        | 2.10MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :  13%|█▎        | 2.10MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :  16%|█▌        | 2.62MB / 16.1MB            [A[A
+Processing Files (0 / 1)      :  16%|█▌        | 2.62MB / 16.1MB,  749kB/s
+
+New Data Upload               :  16%|█▌        | 2.62MB / 16.1MB,  749kB/s  [A
+
+
+  final_model.int6.ptz        :  16%|█▌        | 2.62MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :  16%|█▌        | 2.62MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :  19%|█▉        | 3.15MB / 16.1MB            [A[A
+Processing Files (0 / 1)      :  19%|█▉        | 3.15MB / 16.1MB,  771kB/s
+
+New Data Upload               :  19%|█▉        | 3.15MB / 16.1MB,  771kB/s  [A
+
+
+  final_model.int6.ptz        :  19%|█▉        | 3.15MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :  19%|█▉        | 3.15MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :  23%|██▎       | 3.67MB / 16.1MB            [A[A
+Processing Files (0 / 1)      :  23%|██▎       | 3.67MB / 16.1MB,  787kB/s
+
+New Data Upload               :  23%|██▎       | 3.67MB / 16.1MB,  787kB/s  [A
+
+
+  final_model.int6.ptz        :  23%|██▎       | 3.67MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :  23%|██▎       | 3.67MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :  26%|██▌       | 4.19MB / 16.1MB            [A[A
+Processing Files (0 / 1)      :  26%|██▌       | 4.19MB / 16.1MB,  798kB/s
+
+New Data Upload               :  26%|██▌       | 4.19MB / 16.1MB,  798kB/s  [A
+
+
+  final_model.int6.ptz        :  26%|██▌       | 4.19MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :  26%|██▌       | 4.19MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :  29%|██▉       | 4.72MB / 16.1MB            [A[A
+Processing Files (0 / 1)      :  29%|██▉       | 4.72MB / 16.1MB,  807kB/s
+
+New Data Upload               :  29%|██▉       | 4.72MB / 16.1MB,  807kB/s  [A
+
+
+  final_model.int6.ptz        :  29%|██▉       | 4.72MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :  32%|███▏      | 5.24MB / 16.1MB            [A[A
+Processing Files (0 / 1)      :  32%|███▏      | 5.24MB / 16.1MB,  843kB/s
+
+New Data Upload               :  32%|███▏      | 5.24MB / 16.1MB,  843kB/s  [A
+
+
+  final_model.int6.ptz        :  32%|███▏      | 5.24MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :  32%|███▏      | 5.24MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :  36%|███▌      | 5.77MB / 16.1MB            [A[A
+Processing Files (0 / 1)      :  36%|███▌      | 5.77MB / 16.1MB,  846kB/s
+
+New Data Upload               :  36%|███▌      | 5.77MB / 16.1MB,  846kB/s  [A
+
+
+  final_model.int6.ptz        :  36%|███▌      | 5.77MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :  39%|███▉      | 6.29MB / 16.1MB            [A[A
+Processing Files (0 / 1)      :  39%|███▉      | 6.29MB / 16.1MB,  874kB/s
+
+New Data Upload               :  39%|███▉      | 6.29MB / 16.1MB,  874kB/s  [A
+
+
+  final_model.int6.ptz        :  39%|███▉      | 6.29MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :  45%|████▌     | 7.34MB / 16.1MB            [A[A
+Processing Files (0 / 1)      :  45%|████▌     | 7.34MB / 16.1MB,  974kB/s
+
+New Data Upload               :  45%|████▌     | 7.34MB / 16.1MB,  974kB/s  [A
+
+
+  final_model.int6.ptz        :  45%|████▌     | 7.34MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :  49%|████▊     | 7.86MB / 16.1MB            [A[A
+Processing Files (0 / 1)      :  49%|████▊     | 7.86MB / 16.1MB,  992kB/s
+
+New Data Upload               :  49%|████▊     | 7.86MB / 16.1MB,  992kB/s  [A
+
+
+  final_model.int6.ptz        :  49%|████▊     | 7.86MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :  52%|█████▏    | 8.39MB / 16.1MB            [A[A
+Processing Files (0 / 1)      :  52%|█████▏    | 8.39MB / 16.1MB, 1.01MB/s
+
+New Data Upload               :  52%|█████▏    | 8.39MB / 16.1MB, 1.01MB/s  [A
+
+
+  final_model.int6.ptz        :  55%|█████▌    | 8.91MB / 16.1MB            [A[A
+Processing Files (0 / 1)      :  55%|█████▌    | 8.91MB / 16.1MB, 1.05MB/s
+
+New Data Upload               :  55%|█████▌    | 8.91MB / 16.1MB, 1.05MB/s  [A
+
+
+  final_model.int6.ptz        :  55%|█████▌    | 8.91MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :  58%|█████▊    | 9.44MB / 16.1MB            [A[A
+Processing Files (0 / 1)      :  58%|█████▊    | 9.44MB / 16.1MB, 1.06MB/s
+
+New Data Upload               :  58%|█████▊    | 9.44MB / 16.1MB, 1.06MB/s  [A
+
+
+  final_model.int6.ptz        :  58%|█████▊    | 9.44MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :  62%|██████▏   | 9.96MB / 16.1MB            [A[A
+Processing Files (0 / 1)      :  62%|██████▏   | 9.96MB / 16.1MB, 1.07MB/s
+
+New Data Upload               :  62%|██████▏   | 9.96MB / 16.1MB, 1.07MB/s  [A
+
+
+  final_model.int6.ptz        :  62%|██████▏   | 9.96MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :  62%|██████▏   | 9.96MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :  65%|██████▍   | 10.5MB / 16.1MB            [A[A
+Processing Files (0 / 1)      :  65%|██████▍   | 10.5MB / 16.1MB, 1.06MB/s
+
+New Data Upload               :  65%|██████▍   | 10.5MB / 16.1MB, 1.06MB/s  [A
+
+
+  final_model.int6.ptz        :  65%|██████▍   | 10.5MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :  71%|███████▏  | 11.5MB / 16.1MB            [A[A
+Processing Files (0 / 1)      :  71%|███████▏  | 11.5MB / 16.1MB, 1.12MB/s
+
+New Data Upload               :  71%|███████▏  | 11.5MB / 16.1MB, 1.12MB/s  [A
+
+
+  final_model.int6.ptz        :  71%|███████▏  | 11.5MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :  75%|███████▍  | 12.1MB / 16.1MB            [A[A
+Processing Files (0 / 1)      :  75%|███████▍  | 12.1MB / 16.1MB, 1.13MB/s
+
+New Data Upload               :  75%|███████▍  | 12.1MB / 16.1MB, 1.13MB/s  [A
+
+
+  final_model.int6.ptz        :  75%|███████▍  | 12.1MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :  78%|███████▊  | 12.6MB / 16.1MB            [A[A
+Processing Files (0 / 1)      :  78%|███████▊  | 12.6MB / 16.1MB, 1.18MB/s
+
+New Data Upload               :  78%|███████▊  | 12.6MB / 16.1MB, 1.18MB/s  [A
+
+
+  final_model.int6.ptz        :  78%|███████▊  | 12.6MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :  81%|████████  | 13.1MB / 16.1MB            [A[A
+Processing Files (0 / 1)      :  81%|████████  | 13.1MB / 16.1MB, 1.23MB/s
+
+New Data Upload               :  81%|████████  | 13.1MB / 16.1MB, 1.23MB/s  [A
+
+
+  final_model.int6.ptz        :  81%|████████  | 13.1MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :  84%|████████▍ | 13.6MB / 16.1MB            [A[A
+Processing Files (0 / 1)      :  84%|████████▍ | 13.6MB / 16.1MB, 1.18MB/s
+
+New Data Upload               :  84%|████████▍ | 13.6MB / 16.1MB, 1.18MB/s  [A
+
+
+  final_model.int6.ptz        :  84%|████████▍ | 13.6MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :  88%|████████▊ | 14.2MB / 16.1MB            [A[A
+Processing Files (0 / 1)      :  88%|████████▊ | 14.2MB / 16.1MB, 1.23MB/s
+
+New Data Upload               :  88%|████████▊ | 14.2MB / 16.1MB, 1.23MB/s  [A
+
+
+  final_model.int6.ptz        :  88%|████████▊ | 14.2MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :  91%|█████████ | 14.7MB / 16.1MB            [A[A
+Processing Files (0 / 1)      :  91%|█████████ | 14.7MB / 16.1MB, 1.28MB/s
+
+New Data Upload               :  91%|█████████ | 14.7MB / 16.1MB, 1.28MB/s  [A
+
+
+  final_model.int6.ptz        :  91%|█████████ | 14.7MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :  97%|█████████▋| 15.7MB / 16.1MB            [A[A
+Processing Files (0 / 1)      :  97%|█████████▋| 15.7MB / 16.1MB, 1.34MB/s
+
+New Data Upload               :  97%|█████████▋| 15.7MB / 16.1MB, 1.34MB/s  [A
+
+
+  final_model.int6.ptz        :  97%|█████████▋| 15.7MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :  97%|█████████▋| 15.7MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :  97%|█████████▋| 15.7MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :  97%|█████████▋| 15.7MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        :  97%|█████████▋| 15.7MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        : 100%|██████████| 16.1MB / 16.1MB            [A[A
+Processing Files (1 / 1)      : 100%|██████████| 16.1MB / 16.1MB, 1.27MB/s
+
+New Data Upload               : 100%|██████████| 16.1MB / 16.1MB, 1.27MB/s  [A
+
+
+  final_model.int6.ptz        : 100%|██████████| 16.1MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        : 100%|██████████| 16.1MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        : 100%|██████████| 16.1MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        : 100%|██████████| 16.1MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        : 100%|██████████| 16.1MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        : 100%|██████████| 16.1MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        : 100%|██████████| 16.1MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        : 100%|██████████| 16.1MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        : 100%|██████████| 16.1MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        : 100%|██████████| 16.1MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        : 100%|██████████| 16.1MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        : 100%|██████████| 16.1MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        : 100%|██████████| 16.1MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        : 100%|██████████| 16.1MB / 16.1MB            [A[A
+
+
+  final_model.int6.ptz        : 100%|██████████| 16.1MB / 16.1MB            [A[A
+Processing Files (1 / 1)      : 100%|██████████| 16.1MB / 16.1MB,  986kB/s
+
+New Data Upload               : 100%|██████████| 16.1MB / 16.1MB,  986kB/s
+
+  final_model.int6.ptz        : 100%|██████████| 16.1MB / 16.1MB
+hf_upload:final_model.int6.ptz -> shikhar007/parameter-golf-gram-ns/models/seq4096_bankqat.int6.ptz
+hf_upload:logs/seq4096_bankqat.txt -> shikhar007/parameter-golf-gram-ns/logs/seq4096_bankqat.txt
+hf_upload:done repo=shikhar007/parameter-golf-gram-ns

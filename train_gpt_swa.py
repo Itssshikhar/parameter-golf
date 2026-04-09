@@ -564,6 +564,17 @@ class CastedLinear(nn.Linear):
             w = w + (w_q - w).detach()
         bias = self.bias.to(x.dtype) if self.bias is not None else None
         return F.linear(x, w, bias)
+
+def _fake_quantize_int6(w: Tensor) -> Tensor:
+    """STE fake int6 quantization for bank weights during QAT.
+    Matches post-training quantize_int6_per_row (clip_range=31)."""
+    with torch.no_grad():
+        w32 = w.float()
+        row_max = w32.abs().amax(dim=1)
+        scale = (row_max / 31.0).clamp_min(1.0 / 31.0)
+        w_q = torch.clamp(torch.round(w32 / scale[:, None]), -31, 31) * scale[:, None]
+    return w + (w_q.to(w.dtype) - w).detach()
+
 def restore_low_dim_params_to_fp32(module: nn.Module) -> None:
     with torch.no_grad():
         for name, param in module.named_parameters():
@@ -665,6 +676,11 @@ class CausalSelfAttention(nn.Module):
         return (y_g - proj).reshape(B, T, H, D)
     def forward(self, x: Tensor, q_w: Tensor, k_w: Tensor, v_w: Tensor, out_w: Tensor, v_embed: Tensor | None = None, v0: Tensor | None = None) -> tuple[Tensor, Tensor | None]:
         bsz, seqlen, dim = x.shape
+        if CastedLinear._qat_enabled and self.training:
+            q_w = _fake_quantize_int6(q_w)
+            k_w = _fake_quantize_int6(k_w)
+            v_w = _fake_quantize_int6(v_w)
+            out_w = _fake_quantize_int6(out_w)
         q = F.linear(x, q_w.to(x.dtype)).reshape(bsz, seqlen, self.num_heads, self.head_dim)
         k = F.linear(x, k_w.to(x.dtype)).reshape(bsz, seqlen, self.num_kv_heads, self.head_dim)
         v = F.linear(x, v_w.to(x.dtype))
@@ -765,6 +781,9 @@ class MLP(nn.Module):
         super().__init__()
         # No CastedLinear -- weights come from banks
     def forward(self, x: Tensor, up_w: Tensor, down_w: Tensor) -> Tensor:
+        if CastedLinear._qat_enabled and self.training:
+            up_w = _fake_quantize_int6(up_w)
+            down_w = _fake_quantize_int6(down_w)
         x = F.leaky_relu(F.linear(x, up_w.to(x.dtype)), negative_slope=0.5)
         return F.linear(x.square(), down_w.to(x.dtype))
 

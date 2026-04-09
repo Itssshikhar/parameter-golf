@@ -44,7 +44,7 @@ image = (
     volumes={"/data": data_vol},
     secrets=[hf_secret],
 )
-def train():
+def train(seed: int = 1337):
     import subprocess
     import os
     import shutil
@@ -96,26 +96,22 @@ def train():
     val_files = [f for f in os.listdir(dataset_local) if "val" in f]
     print(f"Dataset: {len(train_files)} train shards, {len(val_files)} val shards", flush=True)
 
-    baseline_lines = ["(skipped — see previous run)"]
-
+    run_id = f"seq4096_bankqat_s{seed}"
     env = {
         **os.environ,
-        "RUN_ID": "seq4096_qk25_pko_sag",
+        "RUN_ID": run_id,
+        "SEED": str(seed),
         "TRAIN_SEQ_LEN": "4096",
         "EVAL_SEQ_LEN": "4096",
         "SWA_WINDOW_SIZE": "256",
         "SWA_FULL_ATTN_LAYERS": "5",
-        # QK_GAIN_INIT defaults to 2.5 in code
         "PARTIAL_KEY_OFFSET": "1",
-        "SPARSE_ATTN_GATE": "1",
         "BIGRAM_VOCAB_SIZE": "3072",
         "BIGRAM_DIM": "112",
         "WARMDOWN_ITERS": "4000",
-        "SWA_WINDOW_SIZE": "256",
-        "SWA_FULL_ATTN_LAYERS": "5",
     }
 
-    print("=== SWA TRAINING START ===", flush=True)
+    print(f"=== TRAINING seed={seed} run_id={run_id} ===", flush=True)
     proc = subprocess.Popen(
         ["torchrun", "--standalone", "--nproc_per_node=8", "train_gpt_swa.py"],
         env=env,
@@ -132,13 +128,26 @@ def train():
         lines.append(line)
 
     proc.wait()
-    print(f"=== TRAINING DONE (exit code {proc.returncode}) ===", flush=True)
-    return "=== BASELINE LOG ===\n" + "\n".join(baseline_lines) + "\n=== SWA LOG ===\n" + "\n".join(lines)
+    print(f"=== DONE seed={seed} exit={proc.returncode} ===", flush=True)
+    return "\n".join(lines)
 
 
 @app.local_entrypoint()
 def main():
-    log = train.remote()
-    with open("swa_run.log", "w") as f:
-        f.write(log)
-    print(f"\nLog saved to swa_run.log")
+    seeds = [1337, 42, 7]
+    # Run seeds sequentially (Modal account GPU limit)
+    for seed in seeds:
+        print(f"\n{'='*60}")
+        print(f"=== STARTING seed={seed} ===")
+        print(f"{'='*60}")
+        log = train.remote(seed=seed)
+        logfile = f"swa_run_s{seed}.log"
+        with open(logfile, "w") as f:
+            f.write(log)
+        for line in log.split("\n"):
+            if "sliding_window_exact" in line:
+                print(f"seed={seed}: {line}")
+                break
+        print(f"  log -> {logfile}")
+
+    print("\n=== 3-SEED RUN COMPLETE ===")
