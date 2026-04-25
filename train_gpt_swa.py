@@ -6,11 +6,13 @@ import lzma
 import math
 import os
 import random
+import struct
 import subprocess
 import sys
 import time
 import uuid
 import zlib
+import brotli
 from pathlib import Path
 try:
     import zstandard
@@ -31,11 +33,54 @@ except ImportError:
         from flash_attn.flash_attn_interface import flash_attn_func as flash_attn_3_func
     except ImportError:
         from flash_attn import flash_attn_func as flash_attn_3_func
+
+# --- Brotli + byte-shuffle artifact compression ---
+# Byte-shuffle reorders bytes into n_groups streams so high-order quantization
+# bits become contiguous, which Brotli compresses better than the interleaved layout.
+def byte_shuffle(arr_bytes: bytes, n_groups: int = 4) -> tuple[bytes, int]:
+    """Returns (shuffled_bytes, original_length)."""
+    n = len(arr_bytes)
+    if n_groups <= 1 or n == 0:
+        return arr_bytes, n
+    pad = (-n) % n_groups
+    arr = arr_bytes + b"\x00" * pad
+    padded_n = n + pad
+    stride = padded_n // n_groups
+    out = bytearray(padded_n)
+    for g in range(n_groups):
+        for i in range(stride):
+            out[g * stride + i] = arr[i * n_groups + g]
+    return bytes(out), n
+
+def byte_unshuffle(arr_bytes: bytes, original_n: int, n_groups: int = 4) -> bytes:
+    if n_groups <= 1 or original_n == 0:
+        return arr_bytes[:original_n]
+    pad = (-original_n) % n_groups
+    padded_n = original_n + pad
+    stride = padded_n // n_groups
+    out = bytearray(padded_n)
+    for g in range(n_groups):
+        for i in range(stride):
+            idx = i * n_groups + g
+            if idx < padded_n:
+                out[idx] = arr_bytes[g * stride + i]
+    return bytes(out[:original_n])
+
+def brotli_byteshuffle_compress(data: bytes, n_groups: int = 4, quality: int = 11) -> bytes:
+    """Compress bytes with byte-shuffle + Brotli. 8-byte big-endian original size header."""
+    shuffled, original_n = byte_shuffle(data, n_groups)
+    compressed = brotli.compress(shuffled, quality=quality)
+    return struct.pack(">Q", original_n) + compressed
+
+def brotli_byteshuffle_decompress(blob: bytes, n_groups: int = 4) -> bytes:
+    original_n = struct.unpack(">Q", blob[:8])[0]
+    return byte_unshuffle(brotli.decompress(blob[8:]), original_n, n_groups)
+
 class Hyperparameters:
-    data_path = os.environ.get("DATA_PATH", "./data/datasets/fineweb10B_sp1024")
+    data_path = os.environ.get("DATA_PATH", "./data/datasets/fineweb10B_sp8192")
     train_files = os.path.join(data_path, "fineweb_train_*.bin")
     val_files = os.path.join(data_path, "fineweb_val_*.bin")
-    tokenizer_path = os.environ.get("TOKENIZER_PATH", "./data/tokenizers/fineweb_1024_bpe.model")
+    tokenizer_path = os.environ.get("TOKENIZER_PATH", "./data/tokenizers/fineweb_8192_bpe.model")
     run_id = os.environ.get("RUN_ID", str(uuid.uuid4()))
     seed = int(os.environ.get("SEED", 1337))
     val_batch_size = int(os.environ.get("VAL_BATCH_SIZE", 524_288))
@@ -49,12 +94,12 @@ class Hyperparameters:
     eval_seq_len = int(os.environ.get("EVAL_SEQ_LEN", 2048))
     max_wallclock_seconds = float(os.environ.get("MAX_WALLCLOCK_SECONDS", 600.0))
     qk_gain_init = float(os.environ.get("QK_GAIN_INIT", 2.5))
-    vocab_size = int(os.environ.get("VOCAB_SIZE", 1024))
+    vocab_size = int(os.environ.get("VOCAB_SIZE", 8192))
     num_layers = int(os.environ.get("NUM_LAYERS", 11))
     num_kv_heads = int(os.environ.get("NUM_KV_HEADS", 4))
     model_dim = int(os.environ.get("MODEL_DIM", 512))
     num_heads = int(os.environ.get("NUM_HEADS", 8))
-    mlp_mult = float(os.environ.get("MLP_MULT", 3.0))
+    mlp_mult = float(os.environ.get("MLP_MULT", 4.0))
     tie_embeddings = bool(int(os.environ.get("TIE_EMBEDDINGS", "1")))
     rope_base = float(os.environ.get("ROPE_BASE", 10000.0))
     logit_softcap = float(os.environ.get("LOGIT_SOFTCAP", 30.0))
@@ -82,8 +127,9 @@ class Hyperparameters:
     lawa_enabled = bool(int(os.environ.get("LAWA_ENABLED", "0")))
     lawa_k = int(os.environ.get("LAWA_K", 10))
     lawa_freq = int(os.environ.get("LAWA_FREQ", 100))
-    muon_wd = float(os.environ.get("MUON_WD", 0.04))
-    adam_wd = float(os.environ.get("ADAM_WD", 0.04))
+    muon_wd = float(os.environ.get("MUON_WD", 0.085))
+    adam_wd = float(os.environ.get("ADAM_WD", 0.02))
+    embed_wd = float(os.environ.get("EMBED_WD", 0.085))
     qat_enabled = bool(int(os.environ.get("QAT_ENABLED", "0")))
     bigram_vocab_size = int(os.environ.get("BIGRAM_VOCAB_SIZE", 2048))
     bigram_dim = int(os.environ.get("BIGRAM_DIM", 128))
@@ -392,8 +438,9 @@ INT8_KEEP_FLOAT_FP32_NAME_PATTERNS = tuple(
 INT8_KEEP_FLOAT_MAX_NUMEL = 65_536
 INT8_KEEP_FLOAT_STORE_DTYPE = torch.float16
 INT8_PER_ROW_SCALE_DTYPE = torch.float16
-INT8_CLIP_PERCENTILE = 99.99984
-INT8_CLIP_Q = INT8_CLIP_PERCENTILE / 100.0
+# SDClip: c = k * std(row). Tuned per PR #1394 to land near 16MB on SP8192.
+MATRIX_CLIP_SIGMAS = float(os.environ.get("MATRIX_CLIP_SIGMAS", 12.85))
+EMBED_CLIP_SIGMAS = float(os.environ.get("EMBED_CLIP_SIGMAS", 20.0))
 def tensor_nbytes(t: Tensor) -> int:
     return int(t.numel()) * int(t.element_size())
 def keep_float_tensor(name: str, t: Tensor, passthrough_orig_dtypes: dict[str, str]) -> Tensor:
@@ -403,21 +450,22 @@ def keep_float_tensor(name: str, t: Tensor, passthrough_orig_dtypes: dict[str, s
         passthrough_orig_dtypes[name] = str(t.dtype).removeprefix("torch.")
         return t.to(dtype=INT8_KEEP_FLOAT_STORE_DTYPE).contiguous()
     return t
-def quantize_float_tensor(t: Tensor) -> tuple[Tensor, Tensor]:
+def quantize_float_tensor(t: Tensor, clip_sigmas: float | None = None) -> tuple[Tensor, Tensor]:
+    """Int8 SDClip: c = k * std(row), k=EMBED_CLIP_SIGMAS by default (20.0)."""
+    if clip_sigmas is None:
+        clip_sigmas = EMBED_CLIP_SIGMAS
     t32 = t.float()
     if t32.ndim == 2:
-        clip_abs = (
-            torch.quantile(t32.abs(), INT8_CLIP_Q, dim=1)
-            if t32.numel()
-            else torch.empty((t32.shape[0],), dtype=torch.float32)
-        )
-        clipped = torch.maximum(torch.minimum(t32, clip_abs[:, None]), -clip_abs[:, None])
-        scale = (clip_abs / 127.0).clamp_min(1.0 / 127.0)
-        q = torch.clamp(torch.round(clipped / scale[:, None]), -127, 127).to(torch.int8).contiguous()
+        if t32.numel():
+            row_std = t32.std(dim=1)
+        else:
+            row_std = torch.empty((t32.shape[0],), dtype=torch.float32)
+        scale = (clip_sigmas * row_std / 127.0).clamp_min(1.0 / 127.0)
+        q = torch.clamp(torch.round(t32 / scale[:, None]), -127, 127).to(torch.int8).contiguous()
         return q, scale.to(dtype=INT8_PER_ROW_SCALE_DTYPE).contiguous()
-    clip_abs = float(torch.quantile(t32.abs().flatten(), INT8_CLIP_Q).item()) if t32.numel() else 0.0
-    scale = torch.tensor(clip_abs / 127.0 if clip_abs > 0 else 1.0, dtype=torch.float32)
-    q = torch.clamp(torch.round(torch.clamp(t32, -clip_abs, clip_abs) / scale), -127, 127).to(torch.int8).contiguous()
+    row_std = float(t32.std().item()) if t32.numel() else 0.0
+    scale = torch.tensor(max(clip_sigmas * row_std / 127.0, 1.0 / 127.0), dtype=torch.float32)
+    q = torch.clamp(torch.round(t32 / scale), -127, 127).to(torch.int8).contiguous()
     return q, scale
 def quantize_state_dict_int8(state_dict: dict[str, Tensor]):
     quantized: dict[str, Tensor] = {}
@@ -1289,33 +1337,29 @@ def _classify_param(name: str) -> str:
     if ".attn." in name or (".proj." in name and ".mlp." not in name):
         return "attn"
     return "other"
-def quantize_int6_per_row(t: Tensor, clip_range: int = 31) -> tuple[Tensor, Tensor]:
+def quantize_int6_per_row(t: Tensor, clip_range: int = 31, clip_sigmas: float | None = None) -> tuple[Tensor, Tensor]:
+    """Int6 SDClip: c = k * std(row), k=MATRIX_CLIP_SIGMAS by default (12.85)."""
+    if clip_sigmas is None:
+        clip_sigmas = MATRIX_CLIP_SIGMAS
     t32 = t.float()
     if t32.ndim == 2:
-        best_q, best_s, best_err = None, None, float('inf')
-        for pct in [0.9990, 0.9995, 0.9999, 0.99999, 1.0]:
-            if pct < 1.0:
-                row_clip = torch.quantile(t32.abs(), pct, dim=1)
-            else:
-                row_clip = t32.abs().amax(dim=1)
-            s = (row_clip / clip_range).clamp_min(1.0 / clip_range).to(torch.float16)
-            q = torch.clamp(torch.round(t32 / s.float()[:, None]), -clip_range, clip_range).to(torch.int8)
-            recon = q.float() * s.float()[:, None]
-            err = (t32 - recon).pow(2).mean().item()
-            if err < best_err:
-                best_q, best_s, best_err = q, s, err
-        return best_q, best_s
-    amax = t32.abs().max().item()
-    scale = torch.tensor(amax / clip_range if amax > 0 else 1.0, dtype=torch.float16)
+        row_std = t32.std(dim=1)
+        s = (clip_sigmas * row_std / clip_range).clamp_min(1.0 / clip_range).to(torch.float16)
+        q = torch.clamp(torch.round(t32 / s.float()[:, None]), -clip_range, clip_range).to(torch.int8)
+        return q, s
+    row_std = t32.std().item() if t32.numel() else 0.0
+    scale = torch.tensor(max(clip_sigmas * row_std / clip_range, 1.0 / clip_range), dtype=torch.float16)
     q = torch.clamp(torch.round(t32 / scale.float()), -clip_range, clip_range).to(torch.int8)
     return q, scale
 
-def quantize_int6_gptq(weight, hessian=None, clip_range=31, block_size=128):
-    """Full GPTQ: Hessian-aware int6 quantization with Cholesky error compensation.
-    If hessian is None, falls back to percentile search."""
+def quantize_int6_gptq(weight, hessian=None, clip_range=31, block_size=128, clip_sigmas: float | None = None):
+    """Full GPTQ with SDClip: c = k * std(row), Cholesky error compensation.
+    If hessian is None, falls back to per-row SDClip without GPTQ."""
+    if clip_sigmas is None:
+        clip_sigmas = MATRIX_CLIP_SIGMAS
     t32 = weight.float()
     if t32.ndim != 2 or hessian is None:
-        return _quantize_int6_percentile(t32, clip_range)
+        return _quantize_int6_sdclip(t32, clip_range, clip_sigmas)
     rows, cols = t32.shape
     H = hessian.float().clone()
     dead = torch.diag(H) == 0
@@ -1330,59 +1374,44 @@ def quantize_int6_gptq(weight, hessian=None, clip_range=31, block_size=128):
     Hinv = torch.linalg.cholesky(H)
     Hinv = torch.cholesky_inverse(Hinv)
     Hinv = torch.linalg.cholesky(Hinv, upper=True)
-    best_q = None; best_scale = None; best_err = float('inf')
-    for pct in [0.9990, 0.9995, 0.9999, 0.99999, 1.0]:
-        if pct < 1.0:
-            row_clip = torch.quantile(t32.abs(), pct, dim=1)
-        else:
-            row_clip = t32.abs().amax(dim=1)
-        s = (row_clip / clip_range).clamp_min(1.0 / clip_range).to(torch.float16)
-        sf = s.float()
-        Q = torch.zeros_like(W, dtype=torch.int8)
-        W_work = W.clone()
-        for i1 in range(0, cols, block_size):
-            i2 = min(i1 + block_size, cols)
-            count = i2 - i1
-            W1 = W_work[:, i1:i2].clone()
-            Q1 = torch.zeros(rows, count, dtype=torch.int8)
-            Err1 = torch.zeros(rows, count)
-            Hinv1 = Hinv[i1:i2, i1:i2]
-            for i in range(count):
-                w = W1[:, i]
-                d = Hinv1[i, i]
-                q = torch.clamp(torch.round(w / sf), -clip_range, clip_range).to(torch.int8)
-                Q1[:, i] = q
-                err = (w - q.float() * sf) / d
-                W1[:, i:] -= err.unsqueeze(1) * Hinv1[i, i:].unsqueeze(0)
-                Err1[:, i] = err
-            Q[:, i1:i2] = Q1
-            if i2 < cols:
-                W_work[:, i2:] -= Err1 @ Hinv[i1:i2, i2:]
-        recon = Q.float() * sf[:, None]
-        mse = (W - recon).pow(2).mean().item()
-        if mse < best_err:
-            best_q, best_scale, best_err = Q, s, mse
-    best_q = best_q[:, inv_perm]
-    return best_q, best_scale
+    # SDClip: scale comes from row std (one-shot, no percentile search)
+    row_std = t32.std(dim=1)
+    s = (clip_sigmas * row_std / clip_range).clamp_min(1.0 / clip_range).to(torch.float16)
+    sf = s.float()
+    Q = torch.zeros_like(W, dtype=torch.int8)
+    W_work = W.clone()
+    for i1 in range(0, cols, block_size):
+        i2 = min(i1 + block_size, cols)
+        count = i2 - i1
+        W1 = W_work[:, i1:i2].clone()
+        Q1 = torch.zeros(rows, count, dtype=torch.int8)
+        Err1 = torch.zeros(rows, count)
+        Hinv1 = Hinv[i1:i2, i1:i2]
+        for i in range(count):
+            w = W1[:, i]
+            d = Hinv1[i, i]
+            q = torch.clamp(torch.round(w / sf), -clip_range, clip_range).to(torch.int8)
+            Q1[:, i] = q
+            err = (w - q.float() * sf) / d
+            W1[:, i:] -= err.unsqueeze(1) * Hinv1[i, i:].unsqueeze(0)
+            Err1[:, i] = err
+        Q[:, i1:i2] = Q1
+        if i2 < cols:
+            W_work[:, i2:] -= Err1 @ Hinv[i1:i2, i2:]
+    Q = Q[:, inv_perm]
+    return Q, s
 
-def _quantize_int6_percentile(t32, clip_range=31):
-    """Fallback: percentile search (for 1D or no-Hessian cases)."""
+def _quantize_int6_sdclip(t32, clip_range=31, clip_sigmas: float | None = None):
+    """SDClip per-row int6 (for 1D or no-Hessian cases)."""
+    if clip_sigmas is None:
+        clip_sigmas = MATRIX_CLIP_SIGMAS
     if t32.ndim == 2:
-        best_q, best_s, best_err = None, None, float('inf')
-        for pct in [0.9990, 0.9995, 0.9999, 0.99999, 1.0]:
-            if pct < 1.0:
-                row_clip = torch.quantile(t32.abs(), pct, dim=1)
-            else:
-                row_clip = t32.abs().amax(dim=1)
-            s = (row_clip / clip_range).clamp_min(1.0 / clip_range).to(torch.float16)
-            q = torch.clamp(torch.round(t32 / s.float()[:, None]), -clip_range, clip_range).to(torch.int8)
-            recon = q.float() * s.float()[:, None]
-            err = (t32 - recon).pow(2).mean().item()
-            if err < best_err:
-                best_q, best_s, best_err = q, s, err
-        return best_q, best_s
-    amax = t32.abs().max().item()
-    scale = torch.tensor(amax / clip_range if amax > 0 else 1.0, dtype=torch.float16)
+        row_std = t32.std(dim=1)
+        s = (clip_sigmas * row_std / clip_range).clamp_min(1.0 / clip_range).to(torch.float16)
+        q = torch.clamp(torch.round(t32 / s.float()[:, None]), -clip_range, clip_range).to(torch.int8)
+        return q, s
+    row_std = t32.std().item() if t32.numel() else 0.0
+    scale = torch.tensor(max(clip_sigmas * row_std / clip_range, 1.0 / clip_range), dtype=torch.float16)
     q = torch.clamp(torch.round(t32 / scale.float()), -clip_range, clip_range).to(torch.int8)
     return q, scale
 
@@ -1834,13 +1863,13 @@ def main() -> None:
     if base_model.bigram is not None:
         scalar_params.append(base_model.bigram.scale)
     token_lr = args.tied_embed_lr if args.tie_embeddings else args.embed_lr
-    tok_params = [{"params": [base_model.tok_emb.weight], "lr": token_lr, "base_lr": token_lr}]
+    tok_params = [{"params": [base_model.tok_emb.weight], "lr": token_lr, "base_lr": token_lr, "weight_decay": args.embed_wd}]
     if base_model.bigram is not None:
-        tok_params.append({"params": [base_model.bigram.embed.weight], "lr": token_lr, "base_lr": token_lr})
+        tok_params.append({"params": [base_model.bigram.embed.weight], "lr": token_lr, "base_lr": token_lr, "weight_decay": args.embed_wd})
         if base_model.bigram.proj is not None:
             scalar_params.append(base_model.bigram.proj.weight)
     if base_model.ve_shared is not None:
-        tok_params.append({"params": [base_model.ve_shared.embed.weight], "lr": token_lr, "base_lr": token_lr})
+        tok_params.append({"params": [base_model.ve_shared.embed.weight], "lr": token_lr, "base_lr": token_lr, "weight_decay": args.embed_wd})
         if base_model.ve_shared.proj is not None:
             scalar_params.append(base_model.ve_shared.proj.weight)
         scalar_params.append(base_model.ve_shared.scale)
@@ -2212,7 +2241,7 @@ def main() -> None:
             for i in range(min(n, len(prune_candidates))):
                 tmp[prune_candidates[i][0]].view(-1)[prune_candidates[i][1]] = 0
             buf = io.BytesIO(); torch.save({"w": tmp, "m": quant_meta}, buf)
-            return len(lzma.compress(buf.getvalue(), preset=9)) + code_bytes_est, tmp
+            return len(brotli_byteshuffle_compress(buf.getvalue())) + code_bytes_est, tmp
         no_sz, _ = _try_prune(0)
         target_bytes = int(target_mb * 1024 * 1024)
         total_weights = sum(quant_result[name + ".q"].numel() for name, info in quant_meta.items()
@@ -2236,20 +2265,20 @@ def main() -> None:
     quant_buf = io.BytesIO()
     torch.save({"w": quant_result, "m": quant_meta}, quant_buf)
     quant_raw = quant_buf.getvalue()
-    quant_blob = lzma.compress(quant_raw, preset=9)
+    quant_blob = brotli_byteshuffle_compress(quant_raw)
     if master_process:
         with open("final_model.int6.ptz", "wb") as f:
             f.write(quant_blob)
         quant_file_bytes = len(quant_blob)
         code_bytes = len(code.encode("utf-8"))
-        log0(f"Serialized model int6+lzma: {quant_file_bytes} bytes")
-        log0(f"Total submission size int6+lzma: {quant_file_bytes + code_bytes} bytes")
+        log0(f"Serialized model int6+brotli: {quant_file_bytes} bytes")
+        log0(f"Total submission size int6+brotli: {quant_file_bytes + code_bytes} bytes")
     if distributed:
         dist.barrier()
     with open("final_model.int6.ptz", "rb") as f:
         quant_blob_disk = f.read()
     quant_state = torch.load(
-        io.BytesIO(lzma.decompress(quant_blob_disk)),
+        io.BytesIO(brotli_byteshuffle_decompress(quant_blob_disk)),
         map_location="cpu",
     )
     deq_unbanked = dequantize_mixed_int6(quant_state["w"], quant_state["m"], unbanked_sd)
