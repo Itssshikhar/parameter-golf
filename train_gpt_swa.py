@@ -2,7 +2,6 @@ from __future__ import annotations
 import copy
 import glob
 import io
-import lzma
 import math
 import os
 import random
@@ -93,7 +92,7 @@ class Hyperparameters:
     train_seq_len = int(os.environ.get("TRAIN_SEQ_LEN", 2048))
     eval_seq_len = int(os.environ.get("EVAL_SEQ_LEN", 2048))
     max_wallclock_seconds = float(os.environ.get("MAX_WALLCLOCK_SECONDS", 600.0))
-    qk_gain_init = float(os.environ.get("QK_GAIN_INIT", 2.5))
+    qk_gain_init = float(os.environ.get("QK_GAIN_INIT", 5.0))
     vocab_size = int(os.environ.get("VOCAB_SIZE", 8192))
     num_layers = int(os.environ.get("NUM_LAYERS", 11))
     num_kv_heads = int(os.environ.get("NUM_KV_HEADS", 4))
@@ -155,6 +154,7 @@ class Hyperparameters:
     # Set swa_full_attn_layers=0 to disable (all layers full attention).
     swa_window_size = int(os.environ.get("SWA_WINDOW_SIZE", 256))
     swa_full_attn_layers = int(os.environ.get("SWA_FULL_ATTN_LAYERS", 3))
+    tokenizer_meta_path = os.environ.get("TOKENIZER_META_PATH", "")
 
 # --- Batched Newton-Schulz orthogonalization ---
 
@@ -298,6 +298,10 @@ class Muon(torch.optim.Optimizer):
                 else:
                     update = buf
 
+                if group.get("row_normalize", False):
+                    row_norms = update.float().norm(dim=-1, keepdim=True).clamp_min(1e-7)
+                    update = update / row_norms.to(update.dtype)
+
                 update = zeropower_via_newtonschulz5(update, steps=backend_steps)
 
                 if sharded:
@@ -351,6 +355,91 @@ def build_sentencepiece_luts(
         torch.tensor(has_leading_space_np, dtype=torch.bool, device=device),
         torch.tensor(is_boundary_token_np, dtype=torch.bool, device=device),
     )
+
+TOKENIZER_META_FORMAT_VERSION = 1
+TOKENIZER_META_SUFFIX = ".meta.npz"
+
+
+def _derive_tokenizer_meta_path(tokenizer_path: str) -> Path:
+    tokenizer = Path(tokenizer_path)
+    if tokenizer.suffix == ".model":
+        return tokenizer.with_suffix(TOKENIZER_META_SUFFIX)
+    return tokenizer.with_name(tokenizer.name + TOKENIZER_META_SUFFIX)
+
+
+def load_tokenizer_meta_luts_np(
+    meta_path: Path, vocab_size: int
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, object]]:
+    def _scalar(value):
+        arr = np.asarray(value)
+        if arr.ndim == 0:
+            return arr.item()
+        first = arr.reshape(-1)[0]
+        return first.item() if hasattr(first, "item") else first
+
+    with np.load(meta_path, allow_pickle=False) as data:
+        format_version = int(_scalar(data["format_version"]))
+        if format_version != TOKENIZER_META_FORMAT_VERSION:
+            raise ValueError(
+                f"Unsupported tokenizer meta format_version={format_version} "
+                f"expected={TOKENIZER_META_FORMAT_VERSION}"
+            )
+        meta_vocab_size = int(_scalar(data["vocab_size"]))
+        tokenizer_kind = str(_scalar(data["tokenizer_kind"]))
+        source_model_name = str(_scalar(data["source_model_name"]))
+        base_bytes_np = np.asarray(data["base_bytes"], dtype=np.int16)
+        has_leading_space_np = np.asarray(data["has_leading_space"], dtype=np.bool_)
+        is_boundary_token_np = np.asarray(data["is_boundary_token"], dtype=np.bool_)
+    table_size = max(meta_vocab_size, vocab_size)
+    if base_bytes_np.shape[0] < table_size:
+        padded_base_bytes = np.zeros((table_size,), dtype=np.int16)
+        padded_has_leading_space = np.zeros((table_size,), dtype=np.bool_)
+        padded_is_boundary = np.ones((table_size,), dtype=np.bool_)
+        padded_base_bytes[: base_bytes_np.shape[0]] = base_bytes_np
+        padded_has_leading_space[: has_leading_space_np.shape[0]] = has_leading_space_np
+        padded_is_boundary[: is_boundary_token_np.shape[0]] = is_boundary_token_np
+        base_bytes_np = padded_base_bytes
+        has_leading_space_np = padded_has_leading_space
+        is_boundary_token_np = padded_is_boundary
+    metadata = {
+        "format_version": format_version,
+        "tokenizer_kind": tokenizer_kind,
+        "source_model_name": source_model_name,
+        "vocab_size": meta_vocab_size,
+        "meta_path": str(meta_path),
+    }
+    return base_bytes_np, has_leading_space_np, is_boundary_token_np, metadata
+
+
+def load_tokenizer_luts(
+    tokenizer_path: str,
+    tokenizer_meta_path: str,
+    vocab_size: int,
+    device: torch.device,
+) -> tuple[tuple[Tensor, Tensor, Tensor], dict[str, object]]:
+    meta_path = (
+        Path(tokenizer_meta_path) if tokenizer_meta_path
+        else _derive_tokenizer_meta_path(tokenizer_path)
+    )
+    if meta_path.exists():
+        base_bytes_np, has_leading_space_np, is_boundary_token_np, metadata = (
+            load_tokenizer_meta_luts_np(meta_path, vocab_size)
+        )
+        return (
+            torch.tensor(base_bytes_np, dtype=torch.int16, device=device),
+            torch.tensor(has_leading_space_np, dtype=torch.bool, device=device),
+            torch.tensor(is_boundary_token_np, dtype=torch.bool, device=device),
+        ), metadata
+    if not str(tokenizer_path).endswith(".model"):
+        raise FileNotFoundError(f"No tokenizer meta found at {meta_path} and tokenizer is not .model")
+    sp = spm.SentencePieceProcessor(model_file=tokenizer_path)
+    return build_sentencepiece_luts(sp, vocab_size, device), {
+        "tokenizer_kind": "sentencepiece",
+        "source_model_name": str(tokenizer_path),
+        "vocab_size": int(sp.vocab_size()),
+        "meta_path": None,
+    }
+
 def load_validation_tokens(pattern: str, seq_len: int) -> Tensor:
     files = [Path(p) for p in sorted(glob.glob(pattern))]
     if not files:
@@ -825,7 +914,7 @@ class ValueEmbedding(nn.Module):
         return h * self.scale.to(dtype=h.dtype)
 
 class MLP(nn.Module):
-    def __init__(self, dim: int, mlp_mult: int):
+    def __init__(self, dim: int, mlp_mult: float):
         super().__init__()
         # No CastedLinear -- weights come from banks
     def forward(self, x: Tensor, up_w: Tensor, down_w: Tensor) -> Tensor:
@@ -841,7 +930,7 @@ class Block(nn.Module):
         dim: int,
         num_heads: int,
         num_kv_heads: int,
-        mlp_mult: int,
+        mlp_mult: float,
         rope_base: float,
         qk_gain_init: float,
         layer_idx: int = 0,
@@ -889,7 +978,7 @@ class GPT(nn.Module):
         model_dim: int,
         num_heads: int,
         num_kv_heads: int,
-        mlp_mult: int,
+        mlp_mult: float,
         tie_embeddings: bool,
         tied_embed_init_std: float,
         logit_softcap: float,
@@ -1783,22 +1872,16 @@ def main() -> None:
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed_all(args.seed)
-    if not args.tokenizer_path.endswith(".model"):
-        raise ValueError(f"Script only setup for SentencePiece .model file: {args.tokenizer_path}")
-    sp = spm.SentencePieceProcessor(model_file=args.tokenizer_path)
-    if int(sp.vocab_size()) != args.vocab_size:
-        raise ValueError(
-            f"VOCAB_SIZE={args.vocab_size} does not match tokenizer vocab_size={int(sp.vocab_size())}"
-        )
+    (base_bytes_lut, has_leading_space_lut, is_boundary_token_lut), tokenizer_metadata = load_tokenizer_luts(
+        args.tokenizer_path, args.tokenizer_meta_path, args.vocab_size, device,
+    )
+    log0(f"val_bpb:enabled tokenizer_kind={tokenizer_metadata['tokenizer_kind']} "
+         f"vocab_size={tokenizer_metadata['vocab_size']} meta_path={tokenizer_metadata.get('meta_path')}")
     dataset_dir = Path(args.data_path).resolve()
     actual_train_files = len(list(dataset_dir.glob("fineweb_train_*.bin")))
     effective_eval_seq_len = args.eval_seq_len if args.eval_seq_len > 0 else args.train_seq_len
     val_seq_len = max(args.train_seq_len, effective_eval_seq_len)
     val_tokens = load_validation_tokens(args.val_files, val_seq_len)
-    base_bytes_lut, has_leading_space_lut, is_boundary_token_lut = build_sentencepiece_luts(
-        sp, args.vocab_size, device
-    )
-    log0(f"val_bpb:enabled tokenizer_kind=sentencepiece tokenizer_path={args.tokenizer_path}")
     log0(f"train_loader:dataset:{dataset_dir.name} train_shards:{actual_train_files}")
     log0(f"val_loader:shards pattern={args.val_files} tokens:{val_tokens.numel() - 1}")
     CastedLinear._qat_enabled = args.qat_enabled
@@ -1891,6 +1974,7 @@ def main() -> None:
     )
     for group in optimizer_muon.param_groups:
         group["base_lr"] = args.matrix_lr
+        group["row_normalize"] = True
     optimizer_scalar = torch.optim.AdamW(
         [{"params": scalar_params, "lr": args.scalar_lr, "base_lr": args.scalar_lr}],
         betas=(args.beta1, args.beta2),
@@ -2066,13 +2150,22 @@ def main() -> None:
                  f"lr_mul={_lr_batch_mul:.2f} elapsed:{elapsed_ms:.0f}ms")
 
         zero_grad_all()
+        _prof_enabled = bool(int(os.environ.get("PROFILE_STEPS", "0"))) and step < int(os.environ.get("PROFILE_STEPS", "0"))
+        if _prof_enabled:
+            _pe = {k: torch.cuda.Event(enable_timing=True) for k in
+                   ["data0", "data1", "fwd0", "fwd1", "bwd0", "bwd1",
+                    "clip0", "clip1", "opt0", "opt1", "ema0", "ema1"]}
         train_loss = torch.zeros((), device=device)
+        if _prof_enabled: _pe["data0"].record()
         for micro_step in range(grad_accum_steps):
             x, y = train_loader.next_batch(_current_batch_tokens, args.train_seq_len, grad_accum_steps)
+            if _prof_enabled and micro_step == 0: _pe["data1"].record(); _pe["fwd0"].record()
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=True):
                 loss = model(x, y)
             train_loss += loss.detach()
+            if _prof_enabled and micro_step == 0: _pe["fwd1"].record(); _pe["bwd0"].record()
             (loss * grad_scale).backward()
+        if _prof_enabled: _pe["bwd1"].record()
         train_loss /= grad_accum_steps
         frac = min(step / args.muon_momentum_warmup_steps, 1.0) if args.muon_momentum_warmup_steps > 0 else 1.0
         muon_momentum = (1 - frac) * args.muon_momentum_warmup_start + frac * args.muon_momentum
@@ -2081,8 +2174,10 @@ def main() -> None:
         for opt in optimizers:
             for group in opt.param_groups:
                 group["lr"] = group["base_lr"] * scale * _lr_batch_mul
+        if _prof_enabled: _pe["clip0"].record()
         if args.grad_clip_norm > 0:
             torch.nn.utils.clip_grad_norm_(base_model.parameters(), args.grad_clip_norm)
+        if _prof_enabled: _pe["clip1"].record(); _pe["opt0"].record()
         # === 3-phase overlapped optimizer step ===
         # Phase 1: Launch async reduce-scatter for banks (biggest first)
         optimizer_muon.launch_reduce_scatters()
@@ -2097,11 +2192,22 @@ def main() -> None:
             optimizer_head.step()
         # Phase 3: Wait for RS, local NS5, all-gather (banks processed last)
         optimizer_muon.step()
+        if _prof_enabled: _pe["opt1"].record()
         zero_grad_all()
         # EMA update
+        if _prof_enabled: _pe["ema0"].record()
         with torch.no_grad():
             for name, t in base_model.state_dict().items():
                 ema_state[name].mul_(ema_decay).add_(t.detach().float(), alpha=1.0 - ema_decay)
+        if _prof_enabled:
+            _pe["ema1"].record()
+            torch.cuda.synchronize()
+            log0(f"PROFILE step:{step} data:{_pe['data0'].elapsed_time(_pe['data1']):.1f}ms "
+                 f"fwd:{_pe['fwd0'].elapsed_time(_pe['fwd1']):.1f}ms "
+                 f"bwd:{_pe['bwd0'].elapsed_time(_pe['bwd1']):.1f}ms "
+                 f"clip:{_pe['clip0'].elapsed_time(_pe['clip1']):.1f}ms "
+                 f"opt:{_pe['opt0'].elapsed_time(_pe['opt1']):.1f}ms "
+                 f"ema:{_pe['ema0'].elapsed_time(_pe['ema1']):.1f}ms")
         step += 1
         approx_training_time_ms = training_time_ms + 1000.0 * (time.perf_counter() - t0)
         if args.swa_enabled and scale < 0.2 and step % args.swa_every == 0:
@@ -2215,7 +2321,7 @@ def main() -> None:
     quant_result, quant_meta = mixed_quantize_int6(unbanked_sd, {"mlp", "attn"}, hessians=hessians)
     # Aggressive magnitude pruning: zero out the smallest quantized values
     # sorted by reconstruction error (|q_val| * scale), until artifact fits target size.
-    # Zeros compress extremely well with LZMA — this trades quality for compression.
+    # Zeros compress extremely well with Brotli — this trades quality for compression.
     target_mb = float(os.environ.get("TARGET_MB", "15.9"))
     code_bytes_est = len(code.encode("utf-8"))
     prune_candidates = []  # (tensor_key, flat_idx, reconstruction_error)

@@ -664,13 +664,99 @@ Do not stack changes whose individual contribution is unverified. The 3-seed std
 
 ## Tracking sheet
 
-| Day | Stack | Single-seed BPB | 3-seed BPB | Artifact | Train ms | Eval ms | Status |
+| Run | Stack | Pre-quant BPB | Sliding BPB | Artifact | Step avg | Steps | Status |
 |---|---|---|---|---|---|---|---|
-| 0 | SP1024 + bank QAT + SWA + PKO | — | 1.1117 | 15.97MB | 89ms | 92s | baseline ✅ |
-| 1 | + SP8192 + SDClip + Brotli + WD + MLP4× | TBD | TBD | | | | pending |
-| 2 | + MuonEq-R + QK5 | TBD | TBD | | | | pending |
-| 3 | + Depth recurrence 4,5 | TBD | TBD | | | | pending |
-| 4 | + Parallel residuals @7 | TBD | TBD | | | | pending |
+| 0 | SP1024 + bank QAT + SWA + PKO | — | 1.1117 (3-seed) | 15.97MB | 89ms | — | baseline ✅ |
+| 1a | Day1 defaults: SP8192+SDClip+Brotli+WD+MLP4× SFL=5 seq=4096 | 1.1017 | 1.1171 | 15.73MB | 102ms | 5856 | BPB miss ❌ |
+| 1b | Day1 + SFL=3 seq=2048 | 1.1070 | 1.1103 | 15.75MB | 93.6ms | 6409 | BPB miss ❌ |
+| 1c | Day1 + SFL=3 seq=4096 | 1.0993 | 1.1136 | 15.71MB | 98ms | 6122 | BPB miss ❌ |
+| 1d | Day1 + SFL=3 seq=4096 + MuonEq-R + QK5.0 | **1.0887** | **1.1016** | 16.59MB | 98ms | 6120 | **artifact FAIL** ⚠️ |
+| 2 | + MATRIX_CLIP_SIGMAS=14.0 (pending) | TBD | TBD | | | | superseded |
+| 3 | + Depth recurrence 4,5 | TBD | TBD | | | | superseded |
+| 4 | + Parallel residuals @7 | TBD | TBD | | | | superseded |
 | 5 | + Muon TTT | TBD | TBD | | | | optional |
+| **S1** | **Scylla TM998 + MuonEq-R + QK5 + SFL=3 seq=4096** | **1.0681** | **1.0745** | 13.76MB | 92ms | 6491 | **new best** ✅ |
+| **S2** | **Scylla raw 194 shards + SOTA config (no SWA, MLP3x, QK1.5, seq=2048)** | **1.0920** | **1.0841** | 11.59MB | 88.5ms | 6782 | **CE near-SOTA** ✅ |
+| S3 | + Muon TTT | TBD | TBD | | | | optional |
 
-Update this table after each day's run.
+**Key insight from 1d:** MuonEq-R + QK-Gain 5.0 gave the biggest single improvement (-0.011 pre-quant BPB) but MuonEq-R produces weight distributions that compress ~5% worse under Brotli. Need tighter SDClip (k=14.0) to fit 16MB.
+
+**Quantization gap analysis:**
+- Run 1a: gap = 0.015 (1.1017 → 1.1171)
+- Run 1b: gap = 0.003 (1.1070 → 1.1103) — seq=2048 quantizes best
+- Run 1c: gap = 0.014 (1.0993 → 1.1136)
+- Run 1d: gap = 0.013 (1.0887 → 1.1016) — similar to 1c despite MuonEq-R
+- Run S1: gap = 0.006 (1.0681 → 1.0745) — Scylla TM998 quantizes much better (tiny embedding, 2.24MB headroom)
+- Run S2: gap = -0.008 (1.0920 → 1.0841) — sliding eval improves on non-sliding (expected with full attention)
+
+**Scylla pivot (2026-04-25):** Runs 2-4 superseded by Scylla TokenMonster integration. The existing upstream Scylla PR (#1184) achieved 0.9485 BPB from 1.1122 (−0.1637) with zero architecture changes — just a 998-token TokenMonster vocab swap. We already have the vocab (`scylla.vocab`) and metadata (`scylla.meta.npz`). Retokenizing 128+1 SP8192 shards to TM998 format. The 998-token vocab saves ~3.7MB embedding budget (998×512 vs 8192×512), which resolves the 1d artifact size failure and frees headroom for MuonEq-R.
+
+**Raw retokenization and bpt investigation (2026-04-25):**
+
+Run S2 retokenized from raw `docs_selected.jsonl` (15.37M docs, 45GB) to get 194 train shards + 1 val shard, matching SOTA's data pipeline exactly. Used 32-worker multiprocessing, completed in ~8 minutes.
+
+Key finding: **the BPB gap between us and SOTA is 100% from `bytes_per_token` (bpt), not from model quality.** Detailed analysis:
+
+| Metric | S2 (ours) | SOTA (#1184) | Notes |
+|--------|-----------|-------------|-------|
+| CE sliding (nats) | **1.9327** | 1.9285 | Only 0.004 worse — model nearly as good |
+| bpt (bytes/token) | **2.572** | **2.931** | 14% gap — THIS drives the BPB difference |
+| BPB reported | 1.0841 | 0.9491 | BPB = CE / (bpt × ln2) |
+| BPB if same bpt=2.93 | ~0.952 | 0.9491 | Would rank very close to #1 |
+
+**Why bpt differs:** BPB is computed as `CE_nats / ln(2) × (token_count / byte_count)`, where `byte_count = Σ base_bytes_lut[token_id]` for all eval tokens. The `base_bytes_lut` is identical (verified: same md5 on vocab files, byte-identical meta.npz arrays). The val set text should be identical (same first 50K docs from same JSONL). Yet Scylla's val set averages 2.931 bytes per token while ours averages 2.572.
+
+Possible causes for the bpt discrepancy:
+1. **Different tokenmonster library version** — the tokenization algorithm produces different token sequences from the same text. We use v1.1.12 (latest); Scylla was submitted 2026-03-31 and may have used an earlier version with different ungreedy tokenization behavior.
+2. **Different docs_selected.jsonl snapshot** — the upstream HF dataset may have been updated. Our sidecar says "not canonical 10B shard selection" (from a 50B shuffled train stream). If the canonical version has different first-50K docs, the bpt would differ.
+3. **Scylla's retokenize.py is not available** — it's referenced in their README but not included in the submission record or git tree. We can't verify their exact pipeline.
+
+**What we verified rules OUT:**
+- Different tokenizer vocab (md5 identical: 54b30ead2cca047d3b85058144b47181)
+- Different base_bytes LUT (byte-for-byte identical arrays in meta.npz)
+- SP8192 round-trip artifacts (raw retokenization gives bpt=2.572, same as SP8192→TM998 path at 2.579)
+- BOS prepending (adds only 50K tokens for 50K docs, negligible vs 913K token count gap)
+- Different eval code logic (our byte counting matches SOTA's exactly)
+
+**Implication:** Solving the bpt mystery is the single highest-leverage optimization. Closing the bpt gap from 2.57→2.93 would drop our BPB from 1.084→0.952 — a 0.132 improvement for zero model changes.
+
+**Scylla run S1 config:**
+```bash
+DATA_PATH=./data/datasets/fineweb10B_scylla
+TOKENIZER_PATH=./data/tokenizers/scylla.vocab
+TOKENIZER_META_PATH=./data/tokenizers/scylla.meta.npz
+VOCAB_SIZE=998
+BIGRAM_VOCAB_SIZE=1024
+BIGRAM_DIM=112
+TRAIN_SEQ_LEN=4096
+EVAL_SEQ_LEN=4096
+SWA_WINDOW_SIZE=256
+SWA_FULL_ATTN_LAYERS=3
+QK_GAIN_INIT=5.0
+PARTIAL_KEY_OFFSET=1
+# MuonEq-R enabled via row_normalize=True in code
+```
+
+**Scylla run S2 config (raw 194 shards, SOTA-like):**
+```bash
+DATA_PATH=./data/datasets/fineweb10B_scylla_raw
+TOKENIZER_PATH=./data/tokenizers/scylla.vocab
+TOKENIZER_META_PATH=./data/tokenizers/scylla.meta.npz
+VOCAB_SIZE=998
+BIGRAM_VOCAB_SIZE=2816
+BIGRAM_DIM=112
+TRAIN_SEQ_LEN=2048
+EVAL_SEQ_LEN=2048
+SWA_WINDOW_SIZE=0  # full attention, no sliding window during training
+MLP_MULT=3.0
+QK_GAIN_INIT=1.5
+XSA_LAST_N=11
+# MuonEq-R enabled, EMA 0.997, SWA weight avg every 50 steps
+# Uploaded: shikhar007/parameter-golf-gram-ns (run de841af9)
+```
+
+**Expected impact of Scylla swap:**
+- BPB = CE_nats / bytes_per_token / ln2. Scylla bytes_per_token ≈ 4.13 (from meta), SP8192 ≈ 4.0. Similar. The win comes from smaller vocab (998 vs 8192): fewer classes to predict → lower CE. The upstream result was 0.9485 from 1.1122 = −0.1637 BPB.
+- Embedding table: 998×512 = 511K params (int8 ≈ 499KB) vs 8192×512 = 4.2M (int8 ≈ 4.0MB). Saves ~3.5MB artifact budget.
+- Logit projection: (batch, seq, 998) vs (batch, seq, 8192) — significantly cheaper fwd/bwd. Expect ~5-10ms/step savings.
+- Token ratio: ~1.51x more tokens per byte → sequences cover less text. SWA w=256 covers ~690 bytes vs ~1024 bytes before.

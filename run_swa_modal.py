@@ -28,6 +28,7 @@ image = (
         extra_options="--extra-index-url https://download.pytorch.org/whl/cu128",
     )
     .pip_install("psutil", "packaging", "ninja", "wheel", "setuptools")
+    .pip_install("brotli")
     .run_commands(
         # FA3 standalone for H100 — exact same setup as current #1 submission
         "pip install flash_attn_3 --find-links https://windreamer.github.io/flash-attention3-wheels/cu128_torch291",
@@ -57,8 +58,8 @@ def train(seed: int = 1337):
     shutil.copy2("/opt/train_gpt_original.py", "train_gpt_original.py")
 
     # Dataset
-    dataset_vol = "/data/fineweb10B_sp1024"
-    dataset_local = "./data/datasets/fineweb10B_sp1024"
+    dataset_vol = "/data/fineweb10B_sp8192"
+    dataset_local = "./data/datasets/fineweb10B_sp8192"
     tokenizer_vol = "/data/tokenizers"
     tokenizer_local = "./data/tokenizers"
 
@@ -69,8 +70,10 @@ def train(seed: int = 1337):
             check=True,
         )
         shutil.copytree("/tmp/repo/data", "./data", dirs_exist_ok=True)
+        env_dl = {**os.environ, "MATCHED_FINEWEB_REPO_ID": "kevclark/parameter-golf"}
         subprocess.run(
-            ["python3", "data/cached_challenge_fineweb.py", "--variant", "sp1024"],
+            ["python3", "data/cached_challenge_fineweb.py", "--variant", "sp8192", "--train-shards", "128"],
+            env=env_dl,
             check=True,
         )
         os.makedirs(dataset_vol, exist_ok=True)
@@ -96,7 +99,7 @@ def train(seed: int = 1337):
     val_files = [f for f in os.listdir(dataset_local) if "val" in f]
     print(f"Dataset: {len(train_files)} train shards, {len(val_files)} val shards", flush=True)
 
-    run_id = f"seq4096_bankqat_s{seed}"
+    run_id = f"day1_sp8192_s{seed}"
     env = {
         **os.environ,
         "RUN_ID": run_id,
@@ -106,9 +109,8 @@ def train(seed: int = 1337):
         "SWA_WINDOW_SIZE": "256",
         "SWA_FULL_ATTN_LAYERS": "5",
         "PARTIAL_KEY_OFFSET": "1",
-        "BIGRAM_VOCAB_SIZE": "3072",
+        "BIGRAM_VOCAB_SIZE": "2816",
         "BIGRAM_DIM": "112",
-        "WARMDOWN_ITERS": "4000",
     }
 
     print(f"=== TRAINING seed={seed} run_id={run_id} ===", flush=True)
