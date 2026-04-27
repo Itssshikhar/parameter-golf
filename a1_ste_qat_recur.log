@@ -1,0 +1,202 @@
+W0427 12:17:49.549000 75114 torch/distributed/run.py:803] 
+W0427 12:17:49.549000 75114 torch/distributed/run.py:803] *****************************************
+W0427 12:17:49.549000 75114 torch/distributed/run.py:803] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W0427 12:17:49.549000 75114 torch/distributed/run.py:803] *****************************************
+logs/a1_ste_qat_with_recur.txt
+val_bpb:enabled tokenizer_kind=sentencepiece vocab_size=8192 meta_path=None
+train_loader:dataset:fineweb10B_sp8192 train_shards:128
+val_loader:shards pattern=./data/datasets/fineweb10B_sp8192/fineweb_val_*.bin tokens:40538112
+model_params:37422172
+mtp_num_heads:0 mtp_loss_weight:0.2 mtp_params:0
+XSA:last_11 active_layers:[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+sliding_window_attn:layers=[0, 1, 2, 3, 4, 5] window_size=256 full_attn_layers=5
+world_size:8 grad_accum_steps:1
+sdp_backends:cudnn=False flash=True mem_efficient=False math=False
+attention_mode:gqa num_heads:8 num_kv_heads:4
+tie_embeddings:True embed_lr:0.035 head_lr:0.0 matrix_lr:0.025 scalar_lr:0.025
+train_batch_tokens:786432 train_seq_len:4096 iterations:20000 warmup_steps:20 max_wallclock_seconds:600.000
+seed:1337
+warmup_step:1/20
+warmup_step:2/20
+warmup_step:3/20
+warmup_step:4/20
+warmup_step:5/20
+warmup_step:6/20
+warmup_step:7/20
+warmup_step:8/20
+warmup_step:9/20
+warmup_step:10/20
+warmup_step:11/20
+warmup_step:12/20
+warmup_step:13/20
+warmup_step:14/20
+warmup_step:15/20
+warmup_step:16/20
+warmup_step:17/20
+warmup_step:18/20
+warmup_step:19/20
+warmup_step:20/20
+step:0/20000 val_loss:8.9975 val_bpb:3.4832 train_time:0ms step_avg:0.01ms
+step:1/20000 train_loss:8.9993 train_time:146ms step_avg:145.75ms
+step:2/20000 train_loss:9.6959 train_time:192ms step_avg:95.75ms
+step:3/20000 train_loss:9.9477 train_time:290ms step_avg:96.57ms
+step:4/20000 train_loss:9.6065 train_time:389ms step_avg:97.18ms
+step:5/20000 train_loss:9.2235 train_time:489ms step_avg:97.79ms
+step:6/20000 train_loss:9.0334 train_time:589ms step_avg:98.11ms
+step:7/20000 train_loss:8.6358 train_time:689ms step_avg:98.44ms
+step:8/20000 train_loss:8.0187 train_time:789ms step_avg:98.63ms
+step:9/20000 train_loss:7.8275 train_time:889ms step_avg:98.82ms
+step:10/20000 train_loss:7.5578 train_time:989ms step_avg:98.94ms
+step:500/20000 train_loss:3.2663 train_time:50884ms step_avg:101.77ms
+step:1000/20000 train_loss:2.9973 train_time:102244ms step_avg:102.24ms
+step:1500/20000 train_loss:3.2304 train_time:153535ms step_avg:102.36ms
+step:2000/20000 train_loss:3.0670 train_time:204728ms step_avg:102.36ms
+step:2500/20000 train_loss:3.1998 train_time:255900ms step_avg:102.36ms
+recurrence:activated step:2931 time:300021ms
+qat_with_recurrence:enabled step:2931 noisy=False
+step:3000/20000 train_loss:2.9147 train_time:346775ms step_avg:115.59ms
+step:3500/20000 train_loss:3.0436 train_time:404636ms step_avg:115.61ms
+step:4000/20000 train_loss:2.9385 train_time:462774ms step_avg:115.69ms
+step:4000/20000 val_loss:2.9324 val_bpb:1.1352 train_time:462830ms step_avg:115.71ms
+swa:start step:4400
+step:4500/20000 train_loss:2.9687 train_time:520966ms step_avg:115.77ms
+step:5000/20000 train_loss:2.7956 train_time:579695ms step_avg:115.94ms
+step:5173/20000 val_loss:2.8388 val_bpb:1.0990 train_time:600061ms step_avg:116.00ms
+stopping_early: wallclock_cap train_time:600061ms step:5173/20000
+peak memory allocated: 30835 MiB reserved: 30896 MiB
+ema:applying EMA weights
+DIAGNOSTIC post_ema val_loss:2.8271 val_bpb:1.0945 eval_time:1907ms
+Serialized model: 138533302 bytes
+Code size: 136974 bytes
+gptq:building non-banked model for Hessian collection...
+gptq:enabled recurrence on hessian_model (recur_layers=4,5)
+gptq:AR generation base_model.recur_active=True
+gptq:generating autoregressive calibration data (64 seqs x 2048 tokens, temp=0.8)...
+gptq:generated 64 sequences in 682.8s
+gptq:collecting hessians from autoregressive data...
+gptq:collected hessians for 68 layers (AR self-gen)
+prune: 25712640 candidates of 31719424 total weights, unpruned=15.69MB target=15.9MB
+prune: already fits, no pruning needed
+Serialized model int6+brotli: 16311885 bytes
+Total submission size int6+brotli: 16448859 bytes
+final_int6_roundtrip val_loss:3.0619 val_bpb:1.1854 eval_time:8008ms
+final_int6_roundtrip_exact val_loss:3.06191223 val_bpb:1.18535753
+final_int6_sliding_window val_loss:3.0397 val_bpb:1.1768 stride:64 eval_time:128567ms
+final_int6_sliding_window_exact val_loss:3.03974530 val_bpb:1.17682586
+final_int8_zlib_roundtrip_exact val_loss:3.03974530 val_bpb:1.17682586
+Processing Files (0 / 0)      : |          |  0.00B /  0.00B            
+New Data Upload               : |          |  0.00B /  0.00B            [A
+
+  final_model.pt              :   0%|          |  551kB /  139MB            [A[A
+
+  final_model.pt              :   0%|          |  551kB /  139MB            [A[AProcessing Files (0 / 1)      :   0%|          |  551kB /  139MB,  230kB/s  
+New Data Upload               :   0%|          |  551kB /  139MB,  230kB/s  [A
+
+  final_model.pt              :   0%|          |  551kB /  139MB            [A[A
+
+  final_model.pt              :   0%|          |  551kB /  139MB            [A[A
+
+  final_model.pt              :   1%|          | 1.16MB /  139MB            [A[AProcessing Files (0 / 1)      :   1%|          | 1.16MB /  139MB,  386kB/s  
+New Data Upload               :   1%|          | 1.16MB /  139MB,  386kB/s  [A
+
+  final_model.pt              :   1%|          | 1.71MB /  139MB            [A[AProcessing Files (0 / 1)      :   1%|          | 1.71MB /  139MB,  534kB/s  
+New Data Upload               :   1%|          | 1.71MB /  139MB,  534kB/s  [A
+
+  final_model.pt              :   1%|          | 1.71MB /  139MB            [A[A
+
+  final_model.pt              :   2%|▏         | 2.82MB /  139MB            [A[AProcessing Files (0 / 1)      :   2%|▏         | 2.82MB /  139MB,  784kB/s  
+New Data Upload               :   2%|▏         | 2.82MB /  139MB,  784kB/s  [A
+
+  final_model.pt              :   4%|▍         | 6.19MB /  139MB            [A[AProcessing Files (0 / 1)      :   4%|▍         | 6.19MB /  139MB, 1.63MB/s  
+New Data Upload               :   4%|▍         | 6.19MB /  139MB, 1.63MB/s  [A
+
+  final_model.pt              :   6%|▌         | 8.39MB /  139MB            [A[AProcessing Files (0 / 1)      :   6%|▌         | 8.39MB /  139MB, 2.10MB/s  
+New Data Upload               :   6%|▌         | 8.39MB /  139MB, 2.10MB/s  [A
+
+  final_model.pt              :   9%|▉         | 12.9MB /  139MB            [A[AProcessing Files (0 / 1)      :   9%|▉         | 12.9MB /  139MB, 3.07MB/s  
+New Data Upload               :   9%|▉         | 12.9MB /  139MB, 3.07MB/s  [A
+
+  final_model.pt              :  13%|█▎        | 18.5MB /  139MB            [A[AProcessing Files (0 / 1)      :  13%|█▎        | 18.5MB /  139MB, 4.20MB/s  
+New Data Upload               :  13%|█▎        | 18.5MB /  139MB, 4.20MB/s  [A
+
+  final_model.pt              :  26%|██▌       | 35.7MB /  139MB            [A[AProcessing Files (0 / 1)      :  26%|██▌       | 35.7MB /  139MB, 7.76MB/s  
+New Data Upload               :  26%|██▌       | 35.7MB /  139MB, 7.76MB/s  [A
+
+  final_model.pt              :  37%|███▋      | 50.6MB /  139MB            [A[AProcessing Files (0 / 1)      :  37%|███▋      | 50.6MB /  139MB, 10.5MB/s  
+New Data Upload               :  37%|███▋      | 50.6MB /  139MB, 10.5MB/s  [A
+
+  final_model.pt              :  52%|█████▏    | 71.6MB /  139MB            [A[AProcessing Files (0 / 1)      :  52%|█████▏    | 71.6MB /  139MB, 14.3MB/s  
+New Data Upload               :  52%|█████▏    | 71.6MB /  139MB, 14.3MB/s  [A
+
+  final_model.pt              :  57%|█████▋    | 78.8MB /  139MB            [A[AProcessing Files (0 / 1)      :  57%|█████▋    | 78.8MB /  139MB, 15.2MB/s  
+New Data Upload               :  57%|█████▋    | 78.8MB /  139MB, 15.2MB/s  [A
+
+  final_model.pt              :  60%|█████▉    | 82.8MB /  139MB            [A[AProcessing Files (0 / 1)      :  60%|█████▉    | 82.8MB /  139MB, 15.3MB/s  
+New Data Upload               :  60%|█████▉    | 82.8MB /  139MB, 15.3MB/s  [A
+
+  final_model.pt              :  69%|██████▉   | 95.9MB /  139MB            [A[AProcessing Files (0 / 1)      :  69%|██████▉   | 95.9MB /  139MB, 17.1MB/s  
+New Data Upload               :  69%|██████▉   | 95.9MB /  139MB, 17.1MB/s  [A
+
+  final_model.pt              :  77%|███████▋  |  107MB /  139MB            [A[AProcessing Files (0 / 1)      :  77%|███████▋  |  107MB /  139MB, 18.4MB/s  
+New Data Upload               :  77%|███████▋  |  107MB /  139MB, 18.4MB/s  [A
+
+  final_model.pt              :  88%|████████▊ |  122MB /  139MB            [A[AProcessing Files (0 / 1)      :  88%|████████▊ |  122MB /  139MB, 20.4MB/s  
+New Data Upload               :  88%|████████▊ |  122MB /  139MB, 20.4MB/s  [A
+
+  final_model.pt              : 100%|█████████▉|  138MB /  139MB            [A[AProcessing Files (0 / 1)      : 100%|█████████▉|  138MB /  139MB, 22.3MB/s  
+New Data Upload               : 100%|█████████▉|  138MB /  139MB, 22.3MB/s  [A
+
+  final_model.pt              : 100%|█████████▉|  138MB /  139MB            [A[A
+
+  final_model.pt              : 100%|█████████▉|  138MB /  139MB            [A[A
+
+  final_model.pt              : 100%|█████████▉|  138MB /  139MB            [A[A
+
+  final_model.pt              : 100%|█████████▉|  138MB /  139MB            [A[A
+
+  final_model.pt              : 100%|█████████▉|  138MB /  139MB            [A[A
+
+  final_model.pt              : 100%|█████████▉|  138MB /  139MB            [A[A
+
+  final_model.pt              : 100%|█████████▉|  138MB /  139MB            [A[A
+
+  final_model.pt              : 100%|█████████▉|  138MB /  139MB            [A[A
+
+  final_model.pt              : 100%|█████████▉|  138MB /  139MB            [A[A
+
+  final_model.pt              : 100%|█████████▉|  138MB /  139MB            [A[A
+
+  final_model.pt              : 100%|█████████▉|  138MB /  139MB            [A[A
+
+  final_model.pt              : 100%|█████████▉|  138MB /  139MB            [A[AW0427 12:46:00.006000 75114 torch/distributed/elastic/agent/server/api.py:725] Received 15 death signal, shutting down workers
+W0427 12:46:00.012000 75114 torch/distributed/elastic/multiprocessing/api.py:908] Sending process 75183 closing signal SIGTERM
+W0427 12:46:00.014000 75114 torch/distributed/elastic/multiprocessing/api.py:908] Sending process 75184 closing signal SIGTERM
+W0427 12:46:00.016000 75114 torch/distributed/elastic/multiprocessing/api.py:908] Sending process 75190 closing signal SIGTERM
+Traceback (most recent call last):
+  File "/usr/local/bin/torchrun", line 7, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 357, in wrapper
+    return f(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/torch/distributed/run.py", line 936, in main
+    run(args)
+  File "/usr/local/lib/python3.12/dist-packages/torch/distributed/run.py", line 927, in run
+    elastic_launch(
+  File "/usr/local/lib/python3.12/dist-packages/torch/distributed/launcher/api.py", line 156, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/torch/distributed/launcher/api.py", line 284, in launch_agent
+    result = agent.run()
+             ^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/torch/distributed/elastic/metrics/api.py", line 138, in wrapper
+    result = f(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/torch/distributed/elastic/agent/server/api.py", line 717, in run
+    result = self._invoke_run(role)
+             ^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/torch/distributed/elastic/agent/server/api.py", line 881, in _invoke_run
+    time.sleep(monitor_interval)
+  File "/usr/local/lib/python3.12/dist-packages/torch/distributed/elastic/multiprocessing/api.py", line 85, in _terminate_process_handler
+    raise SignalException(f"Process {os.getpid()} got signal: {sigval}", sigval=sigval)
+torch.distributed.elastic.multiprocessing.api.SignalException: Process 75114 got signal: 15
