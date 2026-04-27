@@ -1,173 +1,150 @@
 # v13 Plan — Strip-down + Capacity Recovery
 
-**Date:** 2026-04-28
+**Date:** 2026-04-27
 **Branch:** shikhar
 **Predecessor:** v12 bankless (sliding 1.0955, gap 0.0047, size 16.54 MB — over cap)
 **Goal:** Land a submittable run (≤16 MB) at sliding ≤1.090 BPB, ideally closer to 1.083.
+**Competition SOTA:** PR #1493 at 1.0810 BPB.
 
 ---
 
-## Two coupled goals (and the tension between them)
+## Experiment Results Summary
+
+### v13a — Strip VE (baseline, no TTT)
+**Config:** VE_ENABLED=0, TARGET_MB=15.2, TTT_ENABLED=0, everything else same as v12.
+
+| Metric | v12 | v13a | Delta |
+|--------|-----|------|-------|
+| post_ema val_bpb | 1.0908 | **1.0901** | -0.0007 (better) |
+| val_loss | 2.8177 | 2.8174 | -0.0003 |
+| final_int6_roundtrip_exact | 1.1050 | **1.1050** | 0.0000 |
+| sliding BPB | 1.0955 | **1.0955** | 0.0000 |
+| size (bytes) | 16,537,005 | **15,844,725** | -692,280 |
+| submittable? | NO (over cap) | **YES** | |
+| training steps | ~4836 | 5108 | +272 (fewer params = faster steps) |
+
+**Finding: VE strip is essentially free.** Val_loss identical, post-EMA actually 0.0007 better due to 272 extra training steps from faster step time. Size comfortably under 16MB cap with no pruning. This is our submittable baseline.
+
+### v13b — Strip Bigram (VE kept) — SKIPPED
+Skipped in favor of testing TTT directly on v13a config. The v13b run scripts exist but were not completed with the correct tokenizer.
+
+### v13c — TTT on Bankless (first test)
+**Config:** Same as v13a + TTT_ENABLED=1, TTT_LR=0.005, TTT_EPOCHS=3, TTT_CHUNK_TOKENS=32768, TTT_MOMENTUM=0.9.
+
+Training phase identical to v13a (TTT only affects eval):
+- post_ema val_bpb: 1.0897 (matches v13a within noise)
+- final_int6_roundtrip_exact: 1.1067
+
+**TTT eval result:**
+
+| Metric | Without TTT (INT6) | With TTT | Delta |
+|--------|-------------------|----------|-------|
+| BPB | 1.1067 | **1.7519** | **+0.6452 (catastrophic)** |
+| Eval time | ~9s | **571s (~9.5min)** | 63x slower |
+
+**Finding: TTT is DEAD for our stack.** This is the worst TTT failure across all versions:
+- v4 (bank-based): +0.089 BPB
+- v5 (bank-based): +0.046 BPB  
+- v13c (bankless): **+0.645 BPB** — complete divergence
+
+The SGD adaptation catastrophically diverges on the bankless architecture. TTT also nearly exceeds the 10-minute eval cap by itself (571s). **Do not attempt TTT again without fundamental redesign.**
+
+### v13d — Parallel Residuals — NOT YET RUN
+Run script exists at `run_v13d_parallel.sh`. PARALLEL_START_LAYER=7 (layers 7-10 run attn+MLP in parallel). Zero parameter cost, but unknown BPB impact on our stack.
+
+---
+
+## Key Learnings & Bug Fixes
+
+### 1. Tokenizer Mismatch (CRITICAL)
+Initial v13a run used wrong tokenizer file (370,917 bytes from `records/` folder) instead of the correct one (370,952 bytes from `kevclark/parameter-golf` HF repo at `datasets/tokenizers/fineweb_8192_bpe.model`).
+
+- Wrong tokenizer: bytes_per_token = 3.527 → all BPB numbers ~0.06 higher than reality
+- Correct tokenizer: bytes_per_token = 3.727 → matches v12's reported numbers
+
+**Lesson:** Always trace the actual tokenizer path from the run script, don't copy from unrelated directories. The v12 script uses `data/tokenizers/fineweb_8192_bpe.model` — verify the file hash matches before running.
+
+### 2. TARGET_MB Units Bug
+Code interprets TARGET_MB in MiB (×1,048,576 bytes), but competition cap is 16,000,000 decimal bytes.
+- 15.2 MiB = 15,938,355 bytes → 61,645 bytes of headroom under 16MB cap
+- TARGET_MB must be ≤15.25 to be safe
+
+### 3. TTT inference_mode Bug (Fixed in train_v13.py)
+TTT eval crashed with `RuntimeError: Inference tensors cannot be saved for backward` due to two sources of inference-mode RoPE tensor caching:
+
+**Bug 1:** Phase 1 (scoring) in `eval_val_sliding_ttt` used `torch.inference_mode()`, caching RoPE cos/sin as inference tensors. Phase 2 (training) couldn't backprop through them.
+- **Fix:** Changed Phase 1 from `torch.inference_mode()` to `torch.no_grad()` (line 1239).
+
+**Bug 2:** The INT6 roundtrip eval (line 1459) runs under `inference_mode()` before TTT eval is called, also poisoning the RoPE cache.
+- **Fix:** Added RoPE cache invalidation (`m._seq_len_cached = 0` on all `Rotary` modules) before Phase 2 training loop.
+
+Both fixes are in `train_v13.py`. These fixed the crash but TTT still diverged catastrophically on BPB.
+
+### 4. VE Strip is Essentially Free
+Pre-plan estimates suggested VE strip could cost 0.005-0.015 BPB. Actual cost: **0.000 BPB** on val_loss, with post-EMA actually slightly *better* due to recouped training steps. The VE embedding at layers 9,10 was not load-bearing for this architecture.
+
+---
+
+## Original Plan (for reference)
+
+### Two coupled goals (and the tension between them)
 
 1. **Bring pre-quant down from 1.0908 → ~1.083-1.085** (close 0.006-0.008 BPB)
 2. **Get under the 16 MB submission cap** (drop ≥0.6 MB to leave wrapper headroom)
 
-Partially aligned: removing extras frees both params **and** step time.
-Partially fighting: some extras may be load-bearing for pre-quant, and we don't know which without ablation.
-
----
-
-## What v12 carries (vs PR #1394 / #1493 base)
+### What v12 carries (vs PR #1394 / #1493 base)
 
 PR #1394 base: 11 layers, model_dim=512, SP8192 vocab, recurrence on 4-5, parallel residuals optional, MuonEq-R, SDClip k=12.85. **No** SWA, **no** bigram, **no** VE, **no** SmearGate, **no** PKO, **no** XSA, **no** TTT.
 
 v12's extras on top of that base (each is a strip candidate):
 
-| Feature | v12 setting | Estimated size | Step_avg cost | Pre-quant value (best guess) |
-|---|---|---|---|---|
-| **ValueEmbedding** (`ve_shared`) | enabled, vocab×128 + 128→kv_dim_ve proj, layers 9,10 | **~1.0–1.1 MB** (8192×128 ≈ 1M params @ INT8) | small (only 2 layers reinject) | Medium (~0.005–0.015 BPB) |
-| **BigramHashEmbedding** | vocab=3072, dim=112, +proj 112→512 | **~0.40 MB** (344k embed + 57k proj) | small | Low–medium (~0.003–0.010 BPB) |
-| **SmearGate** | per-block gate | **~0.05 MB** (per-layer model_dim params) | small | Low (~0.001–0.003 BPB) |
-| **SWA** (window=256, layers 0-5) | on | **0 MB** (mask only) | negative cost (faster than full) | Disputable. v10 stripped SWA + raised WD with banks: gap unchanged, pre-quant unclear. Probably small effect. |
-| **XSA_LAST_N=11** (XSA on all layers) | on | **0 MB** (gate params only) | non-trivial — extra attention path | Unknown. Our novel contribution — never ablated cleanly post-bankless. |
-| **PKO** | on, full-attn layers | 0 MB | tiny | Low (~0.001–0.003 BPB) |
-| **MTP heads** (mtp_num_heads) | check default | **lm_head × N**, big if >0 | training-only (drop at eval) | Training aid only |
-| **TTT** | disabled (`TTT_ENABLED=0`) | 0 MB | 0 | **Free pre-quant gain** if we turn it on (PR #1493 uses this) |
-
-**Important uncertainty:** size estimates extrapolated from param count × INT8/INT6 byte budgets without seeing the actual prune log breakdown by component. Pull `keep_float_tensor` log lines from v12 to confirm. The VE estimate dominates and is the riskiest number — could be 0.7 MB or 1.3 MB depending on `_ve_target_dim` (= `num_kv_heads × head_dim` = 4 × (512/num_heads)).
-
----
-
-## What we're missing vs PR #1493 (1.0810 SOTA)
-
-| Feature | v12 has | PR #1493 | Cost to add |
+| Feature | v12 setting | Estimated size | Actual strip cost (BPB) |
 |---|---|---|---|
-| **3-layer recurrence (L3-5 → 17 virtual)** | No (L4-5, 13 virtual) | Yes | 0 MB, +30% FLOPs in layers 3-5 → step_avg goes up |
-| **Parallel residuals from L7+** | `PARALLEL_START_LAYER=-1` (off) | On | 0 MB (just resid_mix pattern) — **free if helpful** |
-| **Legal score-first TTT (SGD lr=0.005, 3 epochs)** | Disabled | On | 0 MB. Eval-only. Improves post-quant directly. **Should be on already.** |
-| **Hyperparams: WD=0.095, MLR=0.022, EMA=0.9965** | WD=0.085 likely; check MLR/EMA | These specifically tuned | 0 MB |
-| **Round-robin Muon** (PR #1394 style) | Yes (we ported in v12) | Yes | Already done |
-| **MuonEq-R** | Yes (`row_normalize=True`) | Yes | Already done |
+| **ValueEmbedding** (`ve_shared`) | enabled, vocab×128, layers 9,10 | ~1.0 MB | **0.000** (free!) |
+| **BigramHashEmbedding** | vocab=3072, dim=112 | ~0.40 MB | Not tested |
+| **SmearGate** | per-block gate | ~0.05 MB | Not tested |
+| **SWA** (window=256, layers 0-5) | on | 0 MB | Not tested |
+| **XSA_LAST_N=11** | on | 0 MB | Not tested |
+| **PKO** | on | 0 MB | Not tested |
+| **TTT** | disabled | 0 MB | **+0.645 catastrophic** |
 
-**TTT is the most surprising omission.** The flag exists in v12 (`TTT_ENABLED`, lines 164-170) but defaults off. It's a pure eval-time technique that PR #1493 uses to push their post-quant score. Toggling it on costs nothing at training time and should land as a free-or-near-free post-quant gain. **Critical caveat:** TTT runs after quantization on the dequantized model — its benefit shows up in `final_int6_sliding_window`, not in `post_ema val_bpb`. We need to verify it actually fires correctly with the bankless model.
+### What we're missing vs PR #1493 (1.0810 SOTA)
 
----
-
-## Size math, in detail
-
-v12 numbers from log:
-- `unpruned=15.77 MB`, `target=15.9 MB` → `prune: already fits, no pruning needed`
-- Final `.ptz` blob: **16.4 MB** (per log) / 16.54 MB (per commit message)
-
-The 0.6-0.8 MB delta between unpruned weights and the .ptz file is the **brotli wrapper overhead + tokenizer + metadata + indexing**. That's roughly fixed — we can't compress it further without code changes.
-
-So the *correct* tightening of `target_mb` is **~15.2-15.3** (give 0.7-0.8 MB to wrapper). At 15.77 MB unpruned, that means **0.5-0.6 MB has to actually come out** — either via pruning or by deleting a feature.
-
-**Pruning cost:** PR #1394 / our prior runs suggest pruning ~0.5 MB at INT6 costs ~0.005-0.010 BPB. Not free.
-
-**Strip cost:** Removing a feature shrinks unpruned size **and** can speed up training **and** can change pre-quant — three coupled effects. Strip-vs-prune is not symmetric.
-
-### Two strip candidates that solve size by themselves
-
-1. **Strip ValueEmbedding** (~1 MB out): goes from 15.77 → ~14.8 MB unpruned, comfortably under cap with no pruning needed. Risk: pre-quant gets worse by 0.005-0.015 BPB.
-2. **Strip BigramHashEmbedding** (~0.4 MB out): borderline. 15.77 → 15.4 MB unpruned. Just barely fits with target=15.2. Pre-quant cost ~0.003-0.010 BPB.
-
-**Both** strips: 15.77 → ~14.4 MB. Massive headroom. But two simultaneous strips means we can't attribute pre-quant changes cleanly.
+| Feature | v12 has | PR #1493 | Status |
+|---|---|---|---|
+| **3-layer recurrence (L3-5)** | No (L4-5) | Yes | Not tested |
+| **Parallel residuals from L7+** | Off | On | v13d script ready, not run |
+| **TTT (SGD)** | Disabled | On | **DEAD — diverges on bankless** |
+| **Hyperparams: WD=0.095, MLR=0.022** | Different | Tuned | Not tested |
 
 ---
 
-## Staged run plan
+## Current Status & Next Steps
 
-Resist one mega-run. Three small runs in sequence give clean attribution. Each is ~10 minutes wallclock on 8×H100.
+**Best submittable result:** v13a at sliding 1.0955, size 15,844,725 bytes.
+**Gap to SOTA:** 1.0955 - 1.0810 = 0.0145 BPB.
 
-### v13a — Minimum-risk submittable run
+### Remaining experiments to try:
+1. **v13d — Parallel residuals** (PARALLEL_START_LAYER=7): Free parameter cost, script ready
+2. **3-layer recurrence** (RECUR_LAYERS="3,4,5"): More virtual depth, risk of reopening quant gap
+3. **Hyperparameter tuning** (WD, MLR, EMA): Align with PR #1493's tuned values
+4. **Strip bigram** (if we need more size headroom for adding capacity elsewhere)
 
-**Hypothesis:** TTT + parallel residuals are free wins; bigram is the cleanest size cut.
-
-```bash
-RUN_ID=v13a_ttt_parallel_strip_bigram \
-  TTT_ENABLED=1 TTT_LR=0.005 TTT_EPOCHS=3 \
-  PARALLEL_START_LAYER=7 \
-  BIGRAM_VOCAB_SIZE=0 \
-  TARGET_MB=15.3 \
-  # everything else as v12
-```
-
-Expected outcome:
-- Size: ~15.4 MB unpruned → fits cleanly
-- Pre-quant: roughly flat or slightly worse (±0.005)
-- Sliding (post-quant + TTT): **0.005-0.015 BPB better** than v12 → land 1.080-1.090 territory
-
-**Why this first:** TTT is the cheapest improvement and is already plumbed. Parallel residuals are free architecturally. Bigram is the smaller of the two embedding-class strips, so if it costs us pre-quant we still have VE to fall back on. Worst case we learn TTT is broken with bankless.
-
-### v13b — If v13a still over budget or pre-quant worse
-
-**Hypothesis:** VE is the better strip than bigram (more size, similar pre-quant cost).
-
-```bash
-RUN_ID=v13b_strip_ve \
-  TTT_ENABLED=1 PARALLEL_START_LAYER=7 \
-  VE_LAYERS="" \  # disable VE
-  TARGET_MB=15.3 \
-  # bigram kept
-```
-
-### v13c — Capacity recovery via 3-layer recurrence
-
-**Only if** v13a/b show pre-quant flat or improving. Add the SOTA's recurrence span:
-
-```bash
-RUN_ID=v13c_3layer_recur \
-  RECUR_LAYERS="3,4,5" \
-  # winning config from v13a or v13b
-```
-
-Risk: 3-layer recurrence makes layer 3-5 weights see 3× compute → potentially reopens the quant gap that v12 closed. Watch the gap field carefully. If it moves from 0.005 → 0.015+, abort and return to 2-layer.
+### Dead ends (do not revisit):
+- **TTT on bankless**: Catastrophic divergence (+0.645 BPB), 63x slower eval
+- **TTT on bank-based**: Already failed in v4 (+0.089) and v5 (+0.046)
 
 ---
 
-## Explicitly NOT doing in v13 — and why
+## Files
 
-- **Not stripping SWA.** v10 stripped SWA with banks and it didn't help, but post-bankless it could be different. Saving for v14 if v13 stalls.
-- **Not stripping XSA.** It's our novel contribution and may be load-bearing. Needs controlled ablation later, not bundled with size cuts.
-- **Not stripping SmearGate.** Tiny size payoff (~0.05 MB), pre-quant value unknown but cheap to keep.
-- **Not raising WD to 0.095.** PR #1493's WD=0.095 is tuned for *their* stack with no banks, no bigram, no VE — applying it blindly to ours is cargo-culting until we strip those features first.
-- **Not retuning MLR/EMA.** Same reason — they're correlated with WD and architecture.
-- **Not restoring paired-head Muon yet.** v12 already shows the bankless path works; reintroducing paired-head NS5 to recover step time is a v14 optimization, not a quality move. If TTT gives us 0.01+ BPB, the speed deficit matters less.
-
----
-
-## Critical caveats before running anything
-
-1. **TTT might not be wired correctly with bankless.** The `TTT_ENABLED` flag exists but the SGD step in `train_v12_bankless.py` line ~2158 may have been written for bank weights. **Read the TTT code path before running v13a.** If broken, v13a's expected 0.01-0.015 BPB gain evaporates.
-
-2. **The size of the .ptz wrapper isn't tightly known.** Assuming 0.7 MB based on 15.77 → 16.4 MB. If wrapper varies with content (it might — brotli compresses tokenizer and metadata differently), tightening `TARGET_MB` to 15.3 might still miss. Measure the unpruned-vs-ptz delta on v13a's actual output.
-
-3. **TTT score-first is "legal" only if implemented correctly.** PR #1493 specifies "score before update" — i.e., score the chunk first, then adapt. Doing it the other way is a leakage bug and would invalidate the submission. Verify the order in the code.
-
-4. **The 0.116 BPB v12 jump may not be reproducible cleanly.** v12 uses a separate file (`train_v12_bankless.py`) that may differ from `train_gpt_swa.py` in subtle ways beyond the bank rewrite. Before declaring victory, check that the v12 codepath uses the same data, same seed handling, same eval routine. **Single-seed result with no replicate.** Per the v7 doc's reproducibility data, expect ±0.005 BPB seed variance. v13a should ideally be 2 seeds.
-
-5. **Size estimates are extrapolations**, not ground truth. Pull the per-tensor breakdown from v12's quantized state dict before trusting which strip frees how much.
-
----
-
-## Pre-flight checklist (before pushing v13a)
-
-- [ ] Read TTT code path in `train_v12_bankless.py` (line ~1196 and ~2158) — confirm it calls SGD on per-layer CastedLinear weights, not bank weights.
-- [ ] Confirm TTT runs **score-then-update** order (chunk loss computed before SGD step on that chunk).
-- [ ] Pull per-tensor size breakdown from v12's `final_model.int6.ptz` artifact — confirm VE ≈ 1 MB, bigram ≈ 0.4 MB.
-- [ ] Confirm `BIGRAM_VOCAB_SIZE=0` cleanly disables bigram (no NaN, no shape errors). Read `GPT.__init__` line 924 to verify `if bigram_vocab_size > 0` gate.
-- [ ] Confirm `PARALLEL_START_LAYER=7` is wired to per-block `_parallel` flag in v12 code.
-- [ ] Sanity check: v13a target_mb=15.3 with bigram off → unpruned should be ~15.3-15.4 MB. If under 15.3, no pruning fires (good). If over, pruning fires (acceptable but track BPB cost).
-
----
-
-## Bottom line
-
-The strip+add plan can simultaneously fix size and lower pre-quant — but the cleanest version is staged, not one big run.
-
-- **v13a:** TTT + parallel residuals on, bigram off, target_mb=15.3. Expected sliding 1.080-1.090, submittable.
-- **v13b** (if v13a fails on size or pre-quant): swap bigram-strip for VE-strip.
-- **v13c** (only if v13a/b succeed and pre-quant headroom remains): 3-layer recurrence for SOTA-level capacity, watching the quant gap closely.
-
-If v13a lands at ≤1.090 sliding under 16 MB, **submit it immediately** — that beats our 1.1117 baseline by ~0.02 BPB and locks in a real improvement before the deadline. Don't gamble on v13c if v13a is already a clear improvement.
+| File | Purpose |
+|------|---------|
+| `train_v13.py` | Training script (copied from train_v12_bankless.py + TTT bug fixes) |
+| `run_v13a_strip_ve.sh` | Strip VE config — **submittable baseline** |
+| `run_v13b_strip_bigram.sh` | Strip bigram config (not run with correct tokenizer) |
+| `run_v13c_ttt.sh` | TTT test config (DEAD) |
+| `run_v13d_parallel.sh` | Parallel residuals config (not yet run) |
+| `v13a_strip_ve.log` | v13a run 1 (wrong tokenizer) |
+| `v13a_strip_ve_r2.log` | v13a run 2 (correct tokenizer) — **reference run** |
+| `v13c_ttt_run3.log` | v13c TTT final run (catastrophic result) |
