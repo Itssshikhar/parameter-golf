@@ -1,0 +1,266 @@
+W0426 23:27:49.507000 1122897 torch/distributed/run.py:803] 
+W0426 23:27:49.507000 1122897 torch/distributed/run.py:803] *****************************************
+W0426 23:27:49.507000 1122897 torch/distributed/run.py:803] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W0426 23:27:49.507000 1122897 torch/distributed/run.py:803] *****************************************
+logs/v7c_recur_both.txt
+val_bpb:enabled tokenizer_kind=sentencepiece vocab_size=8192 meta_path=None
+train_loader:dataset:fineweb10B_sp8192 train_shards:128
+val_loader:shards pattern=./data/datasets/fineweb10B_sp8192/fineweb_val_*.bin tokens:40538112
+model_params:37422172
+mtp_num_heads:0 mtp_loss_weight:0.2 mtp_params:0
+XSA:last_11 active_layers:[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+sliding_window_attn:layers=[0, 1, 2, 3, 4, 5] window_size=256 full_attn_layers=5
+world_size:8 grad_accum_steps:1
+sdp_backends:cudnn=False flash=True mem_efficient=False math=False
+attention_mode:gqa num_heads:8 num_kv_heads:4
+tie_embeddings:True embed_lr:0.035 head_lr:0.0 matrix_lr:0.025 scalar_lr:0.025
+train_batch_tokens:786432 train_seq_len:4096 iterations:20000 warmup_steps:20 max_wallclock_seconds:600.000
+seed:1337
+warmup_step:1/20
+warmup_step:2/20
+warmup_step:3/20
+warmup_step:4/20
+warmup_step:5/20
+warmup_step:6/20
+warmup_step:7/20
+warmup_step:8/20
+warmup_step:9/20
+warmup_step:10/20
+warmup_step:11/20
+warmup_step:12/20
+warmup_step:13/20
+warmup_step:14/20
+warmup_step:15/20
+warmup_step:16/20
+warmup_step:17/20
+warmup_step:18/20
+warmup_step:19/20
+warmup_step:20/20
+step:0/20000 val_loss:8.9975 val_bpb:3.4832 train_time:0ms step_avg:0.01ms
+step:1/20000 train_loss:8.9993 train_time:146ms step_avg:146.28ms
+step:2/20000 train_loss:9.6957 train_time:192ms step_avg:95.89ms
+step:3/20000 train_loss:9.9449 train_time:290ms step_avg:96.67ms
+step:4/20000 train_loss:9.6062 train_time:389ms step_avg:97.28ms
+step:5/20000 train_loss:9.2230 train_time:488ms step_avg:97.62ms
+step:6/20000 train_loss:9.0309 train_time:588ms step_avg:98.01ms
+step:7/20000 train_loss:8.6321 train_time:689ms step_avg:98.36ms
+step:8/20000 train_loss:8.0152 train_time:788ms step_avg:98.48ms
+step:9/20000 train_loss:7.8247 train_time:888ms step_avg:98.65ms
+step:10/20000 train_loss:7.5588 train_time:988ms step_avg:98.75ms
+step:500/20000 train_loss:3.3032 train_time:50999ms step_avg:102.00ms
+step:1000/20000 train_loss:3.0218 train_time:102401ms step_avg:102.40ms
+step:1500/20000 train_loss:3.2472 train_time:153625ms step_avg:102.42ms
+step:2000/20000 train_loss:3.0853 train_time:204826ms step_avg:102.41ms
+step:2500/20000 train_loss:3.2109 train_time:256016ms step_avg:102.41ms
+recurrence:activated step:2930 time:300032ms
+step:3000/20000 train_loss:2.9247 train_time:319446ms step_avg:106.48ms
+step:3500/20000 train_loss:3.0518 train_time:377330ms step_avg:107.81ms
+step:4000/20000 train_loss:2.9484 train_time:435313ms step_avg:108.83ms
+step:4000/20000 val_loss:2.9443 val_bpb:1.1398 train_time:435365ms step_avg:108.84ms
+step:4500/20000 train_loss:2.9737 train_time:493242ms step_avg:109.61ms
+swa:start step:4700
+late_qat:enabled step:4848 scale:0.1499
+step:5000/20000 train_loss:2.7953 train_time:551776ms step_avg:110.36ms
+step:5410/20000 val_loss:2.8149 val_bpb:1.0897 train_time:600089ms step_avg:110.92ms
+stopping_early: wallclock_cap train_time:600089ms step:5410/20000
+peak memory allocated: 30793 MiB reserved: 30818 MiB
+ema:applying EMA weights
+DIAGNOSTIC post_ema val_loss:2.8118 val_bpb:1.0886 eval_time:1897ms
+Serialized model: 138533302 bytes
+Code size: 133679 bytes
+gptq:building non-banked model for Hessian collection...
+gptq:generating autoregressive calibration data (64 seqs x 2048 tokens, temp=0.8)...
+gptq:generated 64 sequences in 681.4s
+gptq:collecting hessians from autoregressive data...
+gptq:collected hessians for 68 layers (AR self-gen)
+quant: INT8 override for recurred layers {4, 5}
+prune: 20884205 candidates of 25952256 total weights, unpruned=16.63MB target=15.9MB
+prune: zeroing 2394896/25952256 weights (9.2%) to fit 15.9MB
+Serialized model int6+brotli: 16538571 bytes
+Total submission size int6+brotli: 16672250 bytes
+eval: recurrence disabled for evaluation (recur_skip_eval=1)
+final_int6_roundtrip val_loss:3.1854 val_bpb:1.2332 eval_time:7439ms
+final_int6_roundtrip_exact val_loss:3.18544400 val_bpb:1.23318036
+final_int6_sliding_window val_loss:3.1644 val_bpb:1.2251 stride:64 eval_time:126953ms
+final_int6_sliding_window_exact val_loss:3.16436508 val_bpb:1.22507194
+final_int8_zlib_roundtrip_exact val_loss:3.16436508 val_bpb:1.22507194
+Processing Files (0 / 0)      : |          |  0.00B /  0.00B            
+New Data Upload               : |          |  0.00B /  0.00B            [A
+
+  final_model.pt              :   0%|          |  551kB /  139MB            [A[A
+
+  final_model.pt              :   0%|          |  551kB /  139MB            [A[AProcessing Files (0 / 1)      :   0%|          |  551kB /  139MB,  250kB/s  
+New Data Upload               :   0%|          |  551kB /  139MB,  250kB/s  [A
+
+  final_model.pt              :   0%|          |  551kB /  139MB            [A[A
+
+  final_model.pt              :   0%|          |  551kB /  139MB            [A[A
+
+  final_model.pt              :   0%|          |  551kB /  139MB            [A[A
+
+  final_model.pt              :   1%|          | 1.10MB /  139MB            [A[AProcessing Files (0 / 1)      :   1%|          | 1.10MB /  139MB,  367kB/s  
+New Data Upload               :   1%|          | 1.10MB /  139MB,  367kB/s  [A
+
+  final_model.pt              :   2%|▏         | 2.82MB /  139MB            [A[AProcessing Files (0 / 1)      :   2%|▏         | 2.82MB /  139MB,  881kB/s  
+New Data Upload               :   2%|▏         | 2.82MB /  139MB,  881kB/s  [A
+
+  final_model.pt              :   2%|▏         | 3.37MB /  139MB            [A[AProcessing Files (0 / 1)      :   2%|▏         | 3.37MB /  139MB,  991kB/s  
+New Data Upload               :   2%|▏         | 3.37MB /  139MB,  991kB/s  [A
+
+  final_model.pt              :   4%|▎         | 5.02MB /  139MB            [A[AProcessing Files (0 / 1)      :   4%|▎         | 5.02MB /  139MB, 1.40MB/s  
+New Data Upload               :   4%|▎         | 5.02MB /  139MB, 1.40MB/s  [A
+
+  final_model.pt              :   5%|▍         | 6.68MB /  139MB            [A[AProcessing Files (0 / 1)      :   5%|▍         | 6.68MB /  139MB, 1.76MB/s  
+New Data Upload               :   5%|▍         | 6.68MB /  139MB, 1.76MB/s  [A
+
+  final_model.pt              :  10%|█         | 13.9MB /  139MB            [A[AProcessing Files (0 / 1)      :  10%|█         | 13.9MB /  139MB, 3.48MB/s  
+New Data Upload               :  10%|█         | 13.9MB /  139MB, 3.48MB/s  [A
+
+  final_model.pt              :  14%|█▍        | 20.0MB /  139MB            [A[AProcessing Files (0 / 1)      :  14%|█▍        | 20.0MB /  139MB, 4.77MB/s  
+New Data Upload               :  14%|█▍        | 20.0MB /  139MB, 4.77MB/s  [A
+
+  final_model.pt              :  22%|██▏       | 30.1MB /  139MB            [A[AProcessing Files (0 / 1)      :  22%|██▏       | 30.1MB /  139MB, 6.83MB/s  
+New Data Upload               :  22%|██▏       | 30.1MB /  139MB, 6.83MB/s  [A
+
+  final_model.pt              :  32%|███▏      | 44.0MB /  139MB            [A[AProcessing Files (0 / 1)      :  32%|███▏      | 44.0MB /  139MB, 9.56MB/s  
+New Data Upload               :  32%|███▏      | 44.0MB /  139MB, 9.56MB/s  [A
+
+  final_model.pt              :  54%|█████▍    | 75.4MB /  139MB            [A[AProcessing Files (0 / 1)      :  54%|█████▍    | 75.4MB /  139MB, 15.7MB/s  
+New Data Upload               :  54%|█████▍    | 75.4MB /  139MB, 15.7MB/s  [A
+
+  final_model.pt              :  56%|█████▋    | 78.2MB /  139MB            [A[AProcessing Files (0 / 1)      :  56%|█████▋    | 78.2MB /  139MB, 15.6MB/s  
+New Data Upload               :  56%|█████▋    | 78.2MB /  139MB, 15.6MB/s  [A
+
+  final_model.pt              :  62%|██████▏   | 86.0MB /  139MB            [A[AProcessing Files (0 / 1)      :  62%|██████▏   | 86.0MB /  139MB, 16.5MB/s  
+New Data Upload               :  62%|██████▏   | 86.0MB /  139MB, 16.5MB/s  [A
+
+  final_model.pt              :  67%|██████▋   | 92.8MB /  139MB            [A[AProcessing Files (0 / 1)      :  67%|██████▋   | 92.8MB /  139MB, 17.2MB/s  
+New Data Upload               :  67%|██████▋   | 92.8MB /  139MB, 17.2MB/s  [A
+
+  final_model.pt              :  74%|███████▍  |  102MB /  139MB            [A[AProcessing Files (0 / 1)      :  74%|███████▍  |  102MB /  139MB, 18.3MB/s  
+New Data Upload               :  74%|███████▍  |  102MB /  139MB, 18.3MB/s  [A
+
+  final_model.pt              :  99%|█████████▊|  137MB /  139MB            [A[AProcessing Files (0 / 1)      :  99%|█████████▊|  137MB /  139MB, 23.6MB/s  
+New Data Upload               :  99%|█████████▊|  137MB /  139MB, 23.6MB/s  [A
+
+  final_model.pt              :  99%|█████████▉|  138MB /  139MB            [A[AProcessing Files (0 / 1)      :  99%|█████████▉|  138MB /  139MB, 23.0MB/s  
+New Data Upload               :  99%|█████████▉|  138MB /  139MB, 23.0MB/s  [A
+
+  final_model.pt              :  99%|█████████▉|  138MB /  139MB            [A[A
+
+  final_model.pt              :  99%|█████████▉|  138MB /  139MB            [A[A
+
+  final_model.pt              :  99%|█████████▉|  138MB /  139MB            [A[A
+
+  final_model.pt              :  99%|█████████▉|  138MB /  139MB            [A[A
+
+  final_model.pt              :  99%|█████████▉|  138MB /  139MB            [A[A
+
+  final_model.pt              :  99%|█████████▉|  138MB /  139MB            [A[A
+
+  final_model.pt              :  99%|█████████▉|  138MB /  139MB            [A[A
+
+  final_model.pt              :  99%|█████████▉|  138MB /  139MB            [A[A
+
+  final_model.pt              :  99%|█████████▉|  138MB /  139MB            [A[A
+
+  final_model.pt              :  99%|█████████▉|  138MB /  139MB            [A[A
+
+  final_model.pt              :  99%|█████████▉|  138MB /  139MB            [A[A
+
+  final_model.pt              :  99%|█████████▉|  138MB /  139MB            [A[A
+
+  final_model.pt              :  99%|█████████▉|  138MB /  139MB            [A[A
+
+  final_model.pt              :  99%|█████████▉|  138MB /  139MB            [A[A
+
+  final_model.pt              :  99%|█████████▉|  138MB /  139MB            [A[A
+
+  final_model.pt              :  99%|█████████▉|  138MB /  139MB            [A[A
+
+  final_model.pt              :  99%|█████████▉|  138MB /  139MB            [A[A
+
+  final_model.pt              :  99%|█████████▉|  138MB /  139MB            [A[A
+
+  final_model.pt              : 100%|█████████▉|  138MB /  139MB            [A[AProcessing Files (0 / 1)      : 100%|█████████▉|  138MB /  139MB, 14.1MB/s  
+New Data Upload               : 100%|█████████▉|  138MB /  139MB, 14.1MB/s  [A
+
+  final_model.pt              : 100%|█████████▉|  138MB /  139MB            [A[A
+
+  final_model.pt              : 100%|█████████▉|  138MB /  139MB            [A[A
+
+  final_model.pt              : 100%|█████████▉|  138MB /  139MB            [A[A
+
+  final_model.pt              : 100%|██████████|  139MB /  139MB            [A[AProcessing Files (1 / 1)      : 100%|██████████|  139MB /  139MB, 13.6MB/s  
+New Data Upload               : 100%|██████████|  139MB /  139MB, 13.6MB/s  [A
+
+  final_model.pt              : 100%|██████████|  139MB /  139MB            [A[A
+
+  final_model.pt              : 100%|██████████|  139MB /  139MB            [A[A
+
+  final_model.pt              : 100%|██████████|  139MB /  139MB            [A[A
+
+  final_model.pt              : 100%|██████████|  139MB /  139MB            [A[A
+
+  final_model.pt              : 100%|██████████|  139MB /  139MB            [A[A
+
+  final_model.pt              : 100%|██████████|  139MB /  139MB            [A[A
+
+  final_model.pt              : 100%|██████████|  139MB /  139MB            [A[A
+
+  final_model.pt              : 100%|██████████|  139MB /  139MB            [A[A
+
+  final_model.pt              : 100%|██████████|  139MB /  139MB            [A[A
+
+  final_model.pt              : 100%|██████████|  139MB /  139MB            [A[A
+
+  final_model.pt              : 100%|██████████|  139MB /  139MB            [A[AProcessing Files (1 / 1)      : 100%|██████████|  139MB /  139MB, 13.8MB/s  
+New Data Upload               : 100%|██████████|  139MB /  139MB, 13.8MB/s  
+  final_model.pt              : 100%|██████████|  139MB /  139MB            
+hf_upload:final_model.pt -> shikhar007/parameter-golf-gram-ns/models/v7c_recur_both.pt
+Processing Files (0 / 0)      : |          |  0.00B /  0.00B            
+New Data Upload               : |          |  0.00B /  0.00B            [A
+
+  final_model.int6.ptz        :  76%|███████▌  | 12.6MB / 16.5MB            [A[A
+
+  final_model.int6.ptz        :  76%|███████▌  | 12.6MB / 16.5MB            [A[AProcessing Files (0 / 1)      :  76%|███████▌  | 12.6MB / 16.5MB, 63.0MB/s  
+New Data Upload               :  76%|███████▌  | 12.6MB / 16.5MB, 63.0MB/s  [A
+
+  final_model.int6.ptz        :  98%|█████████▊| 16.3MB / 16.5MB            [A[AProcessing Files (0 / 1)      :  98%|█████████▊| 16.3MB / 16.5MB, 40.7MB/s  
+New Data Upload               :  98%|█████████▊| 16.3MB / 16.5MB, 40.7MB/s  [A
+
+  final_model.int6.ptz        :  98%|█████████▊| 16.3MB / 16.5MB            [A[A
+
+  final_model.int6.ptz        :  98%|█████████▊| 16.3MB / 16.5MB            [A[A
+
+  final_model.int6.ptz        :  98%|█████████▊| 16.3MB / 16.5MB            [A[A
+
+  final_model.int6.ptz        :  98%|█████████▊| 16.3MB / 16.5MB            [A[A
+
+  final_model.int6.ptz        :  98%|█████████▊| 16.3MB / 16.5MB            [A[A
+
+  final_model.int6.ptz        :  98%|█████████▊| 16.3MB / 16.5MB            [A[A
+
+  final_model.int6.ptz        :  98%|█████████▊| 16.3MB / 16.5MB            [A[A
+
+  final_model.int6.ptz        : 100%|██████████| 16.5MB / 16.5MB            [A[AProcessing Files (1 / 1)      : 100%|██████████| 16.5MB / 16.5MB, 8.27MB/s  
+New Data Upload               : 100%|██████████| 16.5MB / 16.5MB, 8.27MB/s  [A
+
+  final_model.int6.ptz        : 100%|██████████| 16.5MB / 16.5MB            [A[A
+
+  final_model.int6.ptz        : 100%|██████████| 16.5MB / 16.5MB            [A[A
+
+  final_model.int6.ptz        : 100%|██████████| 16.5MB / 16.5MB            [A[A
+
+  final_model.int6.ptz        : 100%|██████████| 16.5MB / 16.5MB            [A[A
+
+  final_model.int6.ptz        : 100%|██████████| 16.5MB / 16.5MB            [A[A
+
+  final_model.int6.ptz        : 100%|██████████| 16.5MB / 16.5MB            [A[A
+
+  final_model.int6.ptz        : 100%|██████████| 16.5MB / 16.5MB            [A[AProcessing Files (1 / 1)      : 100%|██████████| 16.5MB / 16.5MB, 5.17MB/s  
+New Data Upload               : 100%|██████████| 16.5MB / 16.5MB, 5.17MB/s  
+  final_model.int6.ptz        : 100%|██████████| 16.5MB / 16.5MB            
+hf_upload:final_model.int6.ptz -> shikhar007/parameter-golf-gram-ns/models/v7c_recur_both.int6.ptz
+hf_upload:logs/v7c_recur_both.txt -> shikhar007/parameter-golf-gram-ns/logs/v7c_recur_both.txt
+hf_upload:done repo=shikhar007/parameter-golf-gram-ns
