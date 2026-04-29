@@ -39,6 +39,7 @@ Filled in as each experiment finishes. `pre` = pre-quantization post-EMA val_bpb
 | 5 | evalloop3 | `EVAL_NUM_LOOPS=3` | — | — | — | — | — | — | running |
 | 6 | wd_paired | `WD_SCHEDULE_ENABLED=1 PAIRED_HEAD_MUON_ENABLED=1` | 1.08610 | 1.09891 | 1.08209 | **1.07974** | 16,029,924 | 4596/20000 | done — small real stack win, see `pr1493_wd_paired_session.md` |
 | 7 | wd_strong_paired | `WD_SCHEDULE_ENABLED=1 PAIRED_HEAD_MUON_ENABLED=1 WD_SCHED_LOW_FACTOR=0.50 WD_SCHED_HIGH_FACTOR=1.75` | 1.08573 | 1.09874 | 1.08194 | **1.07971** | 16,030,578 | 4602/20000 | done — pre-quant edge but no q_ttt stack vs wd_paired, see `pr1493_wd_strong_paired_session.md` |
+| 8 | wd_paired_iha | `WD_SCHEDULE_ENABLED=1 PAIRED_HEAD_MUON_ENABLED=1 IHA_ENABLED=1` | 1.08666 | — | — | — | — | 4528/20000 | killed by pre-quant gate (worse than wd_paired by 0.00056), see `pr1493_wd_paired_iha_session.md` |
 
 ## Per-experiment notes
 
