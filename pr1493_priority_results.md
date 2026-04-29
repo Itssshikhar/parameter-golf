@@ -35,8 +35,8 @@ Filled in as each experiment finishes. `pre` = pre-quantization post-EMA val_bpb
 | 1 | docshuffle | `DOC_SHUFFLE_ENABLED=1` | 1.09005 | 1.10121 | 1.08448 | **1.08279** | 16,033,898 | 4526/20000 | done |
 | 2 | wd | `WD_SCHEDULE_ENABLED=1` | 1.08650 | 1.09951 | 1.08269 | **1.08029** | 16,031,886 | 4567/20000 | done — small win |
 | 3 | iha | `IHA_ENABLED=1` | 1.08820 | — | — | — | — | 4524/20000 | **failed during GPTQ** |
-| 4 | mtp | `MTP_WEIGHT=0.10 MTP_STEPS=1` | — | — | — | — | — | — | running |
-| 5 | evalloop3 | `EVAL_NUM_LOOPS=3` | — | — | — | — | — | — | queued |
+| 4 | mtp | `MTP_WEIGHT=0.10 MTP_STEPS=1` | 1.11283 | 1.12678 | 1.11018 | **1.09023** | 16,035,001 | 4438/20000 | done — clear regression |
+| 5 | evalloop3 | `EVAL_NUM_LOOPS=3` | — | — | — | — | — | — | running |
 
 ## Per-experiment notes
 
@@ -119,6 +119,26 @@ the state dict, it looks up the missing key and raises `KeyError`.
 
 Either way, the experiment as committed doesn't run. Skipping for now; flag for the
 runbook author. No usable q_ttt result.
+
+### mtp (done — clear regression)
+
+`MTP_WEIGHT=0.10 MTP_STEPS=1` adds a 10%-weighted auxiliary loss for predicting the
+t+2 token alongside the standard next-token loss. The runbook intentionally disables
+MTP during the TTT adaptation phase, so this measures whether the auxiliary objective
+helps the *trained* model.
+
+**Result: q_ttt = 1.09023 vs comparator 1.08079 → Δ = +0.00944 BPB (much worse).**
+The hit shows up everywhere — pre-quant 1.11283 (vs baseline expected 1.0875-1.0880),
+q_sw 1.11018 (vs baseline 1.083). At this short training budget (~4438 steps before
+wallclock cap), the gradient capacity spent on t+2 prediction is straight-up stolen
+from t+1 fitting; there's no offsetting representation benefit visible by step 4438.
+
+Stop step 4438/20000 (slightly fewer than wd's 4567 — MTP head adds a small per-step
+cost), tok/s shape similar to baseline. Submission size 16,035,001 B — also over the
+16M limit by 35,001 B.
+
+**Verdict: drop at this weight/budget.** Worth an MTP_WEIGHT=0.05 sweep eventually,
+but not before stacking confirmed wins (currently only wd).
 
 ## Errors / learnings (live)
 
