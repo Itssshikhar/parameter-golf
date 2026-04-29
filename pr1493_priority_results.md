@@ -33,8 +33,8 @@ Filled in as each experiment finishes. `pre` = pre-quantization post-EMA val_bpb
 |---|------------|---------|-----|---|------|-------|------|-----------|--------|
 | 0 | baseline_ttt | — | — | — | — | — | — | — | aborted (user requested skip after warmup) |
 | 1 | docshuffle | `DOC_SHUFFLE_ENABLED=1` | 1.09005 | 1.10121 | 1.08448 | **1.08279** | 16,033,898 | 4526/20000 | done |
-| 2 | wd | `WD_SCHEDULE_ENABLED=1` | — | — | — | — | — | — | running |
-| 3 | iha | `IHA_ENABLED=1` | — | — | — | — | — | — | queued |
+| 2 | wd | `WD_SCHEDULE_ENABLED=1` | 1.08650 | 1.09951 | 1.08269 | **1.08029** | 16,031,886 | 4567/20000 | done — small win |
+| 3 | iha | `IHA_ENABLED=1` | — | — | — | — | — | — | running |
 | 4 | mtp | `MTP_WEIGHT=0.10 MTP_STEPS=1` | — | — | — | — | — | — | queued |
 | 5 | evalloop3 | `EVAL_NUM_LOOPS=3` | — | — | — | — | — | — | queued |
 
@@ -67,6 +67,26 @@ Submission size **16,033,898 bytes — over the 16M limit by 33,898 bytes**. Eve
 *had* been better, it wouldn't be submittable without code-size minification.
 
 **Verdict: drop.**
+
+### wd (done — small real win, still below the leaderboard bar)
+
+`WD_SCHEDULE_ENABLED=1` engages a piecewise weight-decay schedule:
+- Hold at 1× until `WD_SCHED_HOLD_FRAC` (default 0.40) of training
+- Ramp linearly to `WD_SCHED_LOW_FACTOR` (default 0.65×) by `WD_SCHED_RAMP_FRAC` (0.85)
+- Ramp up linearly to `WD_SCHED_HIGH_FACTOR` (default 1.5×) at end of training
+
+**Result: q_ttt = 1.08029 vs comparator 1.08079 → Δ = −0.00050 BPB (better).**
+Above the runbook's `0.0002 BPB` "treat as noise" threshold, so this is a real win,
+but well short of the `~0.0017–0.0020 BPB` margin needed to clear the leaderboard
+acceptance bar on its own. Worth re-running across seeds before declaring it stackable.
+
+Stop step 4567/20000 (≈ same as docshuffle's 4526), tok/s held ~7.7M through step 2k
+then drifted to ~6.7M by step 3k — comparable to baseline cost, no extra slowdown.
+Submission size 16,031,886 B — also over the 16M limit by 31,886 B (code itself is
+55,168 B, model+brotli is 15,976,718 B; minification still needed for submit).
+
+**Verdict: keep, but re-run on multiple seeds and combine with another candidate
+(IHA/MTP/evalloop3) to stack toward leaderboard threshold.**
 
 ## Errors / learnings (live)
 
