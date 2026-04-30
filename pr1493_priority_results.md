@@ -46,6 +46,7 @@ Filled in as each experiment finishes. `pre` = pre-quantization post-EMA val_bpb
 | 12 | wd_paired requant: 128-shard AR | `GPTQ_ALL_REDUCE=1` (else same) | 1.08610 | 1.09850 | 1.08174 | **1.07975** | 16,032,588 | n/a | done — AR saturated, Δ vs (11) within noise |
 | 13 | damp sweep at (12) | `GPTQ_DAMP={0.005,0.02,0.03,0.05}` (TTT off, q_sw proxy) | — | 1.0985–1.0986 | 1.08174–1.08182 | n/a | 16,030–16,033 K | n/a | done — 0.01 default optimal |
 | 14 | block_size sweep at (12) | `GPTQ_BLOCK_SIZE={64,256}` (TTT off) | — | 1.0985 | 1.08173–1.08174 | n/a | 16,032–16,033 K | n/a | done — all tied within 3e-6 BPB |
+| 15 | R1 gptq_buy | wd_paired + `GPTQ_CALIBRATION_BATCHES=16 GPTQ_RESERVE_SECONDS=4` | 1.08579 | 1.09864 | 1.08184 | **1.07952** | 16,031,834 | 4653/20000 | done — small real win Δ −0.00022 vs (6); fails q_ttt ≤ 1.07935 gate, see `pr1493_sweep_2026-04-30_session.md` |
 
 ## Per-experiment notes
 
