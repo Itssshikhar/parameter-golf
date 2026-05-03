@@ -1,5 +1,15 @@
 # Record candidate: PR1851 graph + 9-hparam stack + wd_strong + GPTQ AR + pergroup compression
 
+> **3-seed re-evaluation update (2026-05-03):** A follow-up 3-seed run using
+> this directory's own `train_gpt.py` + env block, on the same seeds PR #1855
+> used (42, 0, 1234), gives a **3-seed mean val_bpb of 1.06017968** (stdev
+> 0.00064, spread 0.00127). The headline `1.05956571` below is the seed-42
+> single-seed result and reproduces (re-eval seed 42 = 1.05948583, Δ
+> −0.00008). The honest 3-seed-vs-3-seed delta vs PR #1855 (1.06107587) is
+> **−0.00090**, not the −0.00151 that comes from comparing this candidate's
+> best seed to PR #1855's mean. See [`three_seed_eval/`](three_seed_eval/)
+> for per-seed numbers, logs, and `submission.json`.
+
 **val_bpb: 1.05956571** (seed 42) | **15,901,624 bytes** | 8xH100 SXM, 600s training cap | phased LoRA TTT eval
 
 This is the valid-size recovery of the Run 4 result. Run 4 reached
